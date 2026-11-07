@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# When main is pushed to origin (the private repo), the same code goes to the
+# public showcase repo first (scripts/sync-public.sh). If that fails, nothing is
+# pushed anywhere; `git push --no-verify` updates only the private repo.
+remote=$1
+[ "$remote" = "origin" ] || exit 0
+git remote get-url public >/dev/null 2>&1 || exit 0
+
+zero=0000000000000000000000000000000000000000
+while read -r _local_ref local_sha remote_ref _remote_sha; do
+  if [ "$remote_ref" = "refs/heads/main" ] && [ "$local_sha" != "$zero" ]; then
+    "$(git rev-parse --show-toplevel)/scripts/sync-public.sh" "$local_sha" </dev/null || {
+      echo "Not pushed: the public sync stopped (see above). Push with --no-verify to update only the private repo." >&2
+      exit 1
+    }
+  fi
+done
+exit 0
