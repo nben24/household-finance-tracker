@@ -191,9 +191,16 @@ which is fine for two people.
 
 1. Push the repository to GitHub (private).
 2. Import it in Vercel.
-3. Add `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` and
-   optionally `HOUSEHOLD_TIME_ZONE` and `HOUSEHOLD_WEEK_STARTS_ON`. Do not add the service-role key.
-4. Deploy, then add the Vercel URL to Supabase's Site URL / Redirect URLs.
+3. Add `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
+   `ANTHROPIC_API_KEY` (for AI sorting) and optionally `HOUSEHOLD_TIME_ZONE` and
+   `HOUSEHOLD_WEEK_STARTS_ON`. Do not add the service-role key or the `SEED_*` values.
+4. Deploy, then add the Vercel URL to Supabase's Site URL, and
+   `https://<your-app>.vercel.app/auth/confirm` to its Redirect URLs.
+5. Settings → Functions → Function Region: pick the region of the Supabase
+   project (e.g. Supabase `us-west-2` → Vercel `pdx1`), then redeploy. Every page
+   makes several database calls, so a distant region slows each one down.
+
+Every push to the main branch deploys automatically.
 
 Vercel Hobby and Supabase Free cover this app. Supabase pauses free projects
 after about a week without activity; a weekly Sunday review keeps it awake,
