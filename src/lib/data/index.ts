@@ -7,8 +7,23 @@ import { demoDataSource } from "./demo";
 import { supabaseDataSource } from "./supabase";
 import type { DataSource, SessionContext, TransactionFilter } from "./types";
 
+// While a page renders, the same list is often asked for several times (the
+// dashboard's budget, recurring and spending sections all need categories).
+// These are fetched once per page load. Outside rendering (saves, imports)
+// React's cache does nothing, so a change is always read back fresh.
+const cachedSupabase: DataSource = {
+  ...supabaseDataSource,
+  listAccounts: cache(supabaseDataSource.listAccounts),
+  listCategories: cache(supabaseDataSource.listCategories),
+  listRules: cache(supabaseDataSource.listRules),
+  listBudgetLines: cache(supabaseDataSource.listBudgetLines),
+  listRecurringOverrides: cache(supabaseDataSource.listRecurringOverrides),
+  listBalances: cache(supabaseDataSource.listBalances),
+  listIncomeSources: cache(supabaseDataSource.listIncomeSources),
+};
+
 export function getDataSource(): DataSource {
-  if (isSupabaseConfigured) return supabaseDataSource;
+  if (isSupabaseConfigured) return cachedSupabase;
   if (isDemoMode) return demoDataSource;
   throw new Error(
     "The app is not connected to its database. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.",
@@ -28,13 +43,10 @@ export async function requireHousehold(): Promise<HouseholdContext> {
 }
 
 /** Date of the household's earliest transaction, or null when there are none. */
-export async function earliestTransactionDate(householdId: string): Promise<string | null> {
-  const data = getDataSource();
-  const { total } = await data.listTransactions(householdId, {}, { limit: 1, offset: 0 });
-  if (total === 0) return null;
-  const { rows } = await data.listTransactions(householdId, {}, { limit: 1, offset: total - 1 });
+export const earliestTransactionDate = cache(async (householdId: string): Promise<string | null> => {
+  const { rows } = await getDataSource().listTransactions(householdId, {}, { limit: 1, offset: 0, sort: "oldest" });
   return rows[0]?.transaction_date ?? null;
-}
+});
 
 /** What belongs in Sunday Review: waiting transactions from the review start date on. */
 export function reviewQueueFilter(household: HouseholdRow, extra: TransactionFilter = {}): TransactionFilter {

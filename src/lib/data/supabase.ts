@@ -35,11 +35,13 @@ async function fetchTransactions(
   householdId: string,
   filter: TransactionFilter,
   page: Page,
+  { withTotal = true }: { withTotal?: boolean } = {},
 ): Promise<{ rows: TransactionRow[]; total: number }> {
   const supabase = await createClient();
   let query = supabase
     .from("transactions")
-    .select("*", { count: "exact" })
+    // Counting every match is extra work for the database; only a page needs the total.
+    .select("*", withTotal ? { count: "exact" } : undefined)
     .eq("household_id", householdId);
 
   if (filter.from) query = query.gte("transaction_date", filter.from);
@@ -74,53 +76,40 @@ async function fetchTransactions(
 export const supabaseDataSource: DataSource = {
   async getSession() {
     const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) return null;
-
-    const email = user.email ?? "";
+    // Verifies the signed login token without a trip to the auth server when
+    // the project uses signing keys (it asks the server otherwise).
+    const { data: auth } = await supabase.auth.getClaims();
+    const claims = auth?.claims;
+    if (!claims?.sub) return null;
+    const userId = claims.sub;
+    const email = typeof claims.email === "string" ? claims.email : "";
     const fallbackName = email.split("@")[0] ?? "";
 
-    const { data: membership, error: membershipError } = await supabase
+    // One request: my first household, with everyone in it and their names.
+    const { data: membership, error } = await supabase
       .from("household_members")
-      .select("household_id")
-      .eq("user_id", user.id)
+      .select("households(*, household_members(*, profiles(*)))")
+      .eq("user_id", userId)
       .order("created_at", { ascending: true })
       .limit(1)
       .maybeSingle();
-    if (membershipError) fail("load your household", membershipError);
+    if (error) fail("load your household", error);
 
-    if (!membership) {
-      return { user: { id: user.id, email, name: fallbackName }, household: null, members: [], isDemo: false };
+    type Joined = HouseholdRow & { household_members: (HouseholdMemberRow & { profiles: ProfileRow | null })[] };
+    const household = (membership as { households: Joined | null } | null)?.households;
+    if (!household) {
+      return { user: { id: userId, email, name: fallbackName }, household: null, members: [], isDemo: false };
     }
 
-    const householdId = (membership as Pick<HouseholdMemberRow, "household_id">).household_id;
-    const [household, memberRows] = await Promise.all([
-      supabase.from("households").select("*").eq("id", householdId).single(),
-      supabase.from("household_members").select("*").eq("household_id", householdId),
-    ]);
-    if (household.error) fail("load your household", household.error);
-    if (memberRows.error) fail("load household members", memberRows.error);
-
-    const memberships = memberRows.data as HouseholdMemberRow[];
-    const profiles = await supabase
-      .from("profiles")
-      .select("*")
-      .in("id", memberships.map((member) => member.user_id));
-    if (profiles.error) fail("load household members", profiles.error);
-
-    const members: Member[] = (profiles.data as ProfileRow[])
-      .map((profile) => ({
-        ...profile,
-        role: memberships.find((member) => member.user_id === profile.id)?.role ?? "member",
-      }))
+    const { household_members: memberships, ...householdRow } = household;
+    const members: Member[] = memberships
+      .flatMap((member) => (member.profiles ? [{ ...member.profiles, role: member.role }] : []))
       .sort((a, b) => a.name.localeCompare(b.name));
 
-    const me = members.find((member) => member.id === user.id);
+    const me = members.find((member) => member.id === userId);
     return {
-      user: { id: user.id, email, name: me?.name || fallbackName },
-      household: household.data as HouseholdRow,
+      user: { id: userId, email, name: me?.name || fallbackName },
+      household: householdRow,
       members,
       isDemo: false,
     };
@@ -153,12 +142,16 @@ export const supabaseDataSource: DataSource = {
   async listTransactions(householdId, filter = {}, page) {
     if (page) return fetchTransactions(householdId, filter, page);
 
-    const rows: TransactionRow[] = [];
-    for (let offset = 0; ; offset += FETCH_ALL_CHUNK) {
-      const chunk = await fetchTransactions(householdId, filter, { limit: FETCH_ALL_CHUNK, offset });
-      rows.push(...chunk.rows);
-      if (chunk.rows.length < FETCH_ALL_CHUNK) break;
-    }
+    // The first batch says how many match; the rest are fetched at the same time.
+    const first = await fetchTransactions(householdId, filter, { limit: FETCH_ALL_CHUNK, offset: 0 });
+    const offsets: number[] = [];
+    for (let offset = FETCH_ALL_CHUNK; offset < first.total; offset += FETCH_ALL_CHUNK) offsets.push(offset);
+    const rest = await Promise.all(
+      offsets.map((offset) =>
+        fetchTransactions(householdId, filter, { limit: FETCH_ALL_CHUNK, offset }, { withTotal: false }),
+      ),
+    );
+    const rows = [first, ...rest].flatMap((chunk) => chunk.rows);
     return { rows, total: rows.length };
   },
 
