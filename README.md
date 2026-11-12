@@ -70,6 +70,8 @@ All screenshots are from the built-in demo; every name and number is made up.
 - **Net worth** from dated account balances, including balances read from imports.
 - **Private purchases** (say, a gift for the other person) stay hidden from the
   other person until a reveal date, while still counting in the totals.
+- **Themes**: Evergreen, Lavender or Sand, each in light and dark (or Auto, to
+  follow the device). Chosen per device in Settings, so each person picks their own.
 
 ## Engineering highlights
 

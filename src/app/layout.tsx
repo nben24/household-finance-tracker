@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist } from "next/font/google";
+import { cookies } from "next/headers";
+import { MODE_COOKIE, parseMode, parseTheme, THEME_COOKIE } from "@/lib/appearance";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -18,9 +20,18 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default async function RootLayout({ children }: LayoutProps<"/">) {
+  // read on the server so the page arrives in the right colors, with no flash
+  const cookieStore = await cookies();
+  const theme = parseTheme(cookieStore.get(THEME_COOKIE)?.value);
+  const mode = parseMode(cookieStore.get(MODE_COOKIE)?.value);
   return (
-    <html lang="en" className={`${geistSans.variable} h-full antialiased`}>
+    <html
+      lang="en"
+      data-theme={theme}
+      data-mode={mode}
+      className={`${geistSans.variable} h-full antialiased`}
+    >
       <body className="min-h-full font-sans">{children}</body>
     </html>
   );

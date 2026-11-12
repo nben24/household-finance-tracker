@@ -1,16 +1,17 @@
 @import "tailwindcss";
 
+/*
+ * Colors. A theme (data-theme) sets the surfaces and accent; the mode
+ * (data-mode: auto | light | dark, on <html>) picks its light or dark version.
+ * A theme rule also applies to any element carrying data-theme, which is how
+ * the Settings swatches preview each theme. Chart series colors are shared by
+ * every theme (validated for color-vision deficiency against each surface).
+ */
+
 :root {
-  --bg: #f5f6f8;
-  --surface: #ffffff;
-  --line: #e3e6eb;
-  --text: #111827;
-  --muted: #667085;
-  --accent: #0f766e;
-  --accent-soft: #e3f3f1;
+  color-scheme: light;
   --notice: #92400e;
   --notice-soft: #fef3c7;
-  /* chart series, in fixed order (validated for color-vision deficiency) */
   --series-1: #2a78d6;
   --series-2: #eb6834;
   --series-3: #1baf7a;
@@ -19,15 +20,91 @@
   --series-other: #8b929c;
 }
 
+/* ---- light ---------------------------------------------------------------- */
+
+:root,
+[data-theme="evergreen"] {
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --line: #e3e6eb;
+  --text: #111827;
+  --muted: #667085;
+  --accent: #0f766e;
+  --accent-soft: #e3f3f1;
+}
+
+[data-theme="lavender"] {
+  --bg: #f6f5f9;
+  --surface: #ffffff;
+  --line: #e5e2ec;
+  --text: #17131f;
+  --muted: #6b6578;
+  --accent: #6941c6;
+  --accent-soft: #f1ecfb;
+}
+
+[data-theme="sand"] {
+  --bg: #f4efe6;
+  --surface: #fffcf6;
+  --line: #e6dccb;
+  --text: #231d15;
+  --muted: #73685a;
+  --accent: #1e4a7a;
+  --accent-soft: #e4ecf5;
+}
+
+/* ---- dark: chosen in Settings ---------------------------------------------- */
+
+:root[data-mode="dark"] {
+  color-scheme: dark;
+  --notice: #fcd34d;
+  --notice-soft: #3a2c0a;
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-other: #6b7483;
+}
+
+:root[data-mode="dark"],
+:root[data-mode="dark"] [data-theme="evergreen"] {
+  --bg: #0b0f14;
+  --surface: #141a22;
+  --line: #252d39;
+  --text: #e7ebf0;
+  --muted: #94a1b2;
+  --accent: #2dd4bf;
+  --accent-soft: #12302d;
+}
+
+:root[data-mode="dark"][data-theme="lavender"],
+:root[data-mode="dark"] [data-theme="lavender"] {
+  --bg: #0e0c14;
+  --surface: #17141f;
+  --line: #2a2636;
+  --text: #ece9f3;
+  --muted: #a29cb2;
+  --accent: #b9a4f5;
+  --accent-soft: #2a2140;
+}
+
+:root[data-mode="dark"][data-theme="sand"],
+:root[data-mode="dark"] [data-theme="sand"] {
+  --bg: #12100c;
+  --surface: #1b1813;
+  --line: #2e2920;
+  --text: #efe9df;
+  --muted: #a99f90;
+  --accent: #8fb8e8;
+  --accent-soft: #1c2a3a;
+}
+
+/* ---- dark: Auto, when the device is in dark mode (same values as above) ----- */
+
 @media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0b0f14;
-    --surface: #141a22;
-    --line: #252d39;
-    --text: #e7ebf0;
-    --muted: #94a1b2;
-    --accent: #2dd4bf;
-    --accent-soft: #12302d;
+  :root:not([data-mode="light"]) {
+    color-scheme: dark;
     --notice: #fcd34d;
     --notice-soft: #3a2c0a;
     --series-1: #3987e5;
@@ -36,6 +113,39 @@
     --series-4: #c98500;
     --series-5: #d55181;
     --series-other: #6b7483;
+  }
+
+  :root:not([data-mode="light"]),
+  :root:not([data-mode="light"]) [data-theme="evergreen"] {
+    --bg: #0b0f14;
+    --surface: #141a22;
+    --line: #252d39;
+    --text: #e7ebf0;
+    --muted: #94a1b2;
+    --accent: #2dd4bf;
+    --accent-soft: #12302d;
+  }
+
+  :root:not([data-mode="light"])[data-theme="lavender"],
+  :root:not([data-mode="light"]) [data-theme="lavender"] {
+    --bg: #0e0c14;
+    --surface: #17141f;
+    --line: #2a2636;
+    --text: #ece9f3;
+    --muted: #a29cb2;
+    --accent: #b9a4f5;
+    --accent-soft: #2a2140;
+  }
+
+  :root:not([data-mode="light"])[data-theme="sand"],
+  :root:not([data-mode="light"]) [data-theme="sand"] {
+    --bg: #12100c;
+    --surface: #1b1813;
+    --line: #2e2920;
+    --text: #efe9df;
+    --muted: #a99f90;
+    --accent: #8fb8e8;
+    --accent-soft: #1c2a3a;
   }
 }
 

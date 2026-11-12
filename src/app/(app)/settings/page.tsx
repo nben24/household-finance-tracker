@@ -1,7 +1,10 @@
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
+import { AppearancePicker } from "@/components/settings/appearance-picker";
 import { CategoryEditor } from "@/components/settings/category-editor";
 import { Card, PageHeader, TextLink } from "@/components/ui";
 import { getDataSource, requireHousehold } from "@/lib/data";
+import { MODE_COOKIE, parseMode, parseTheme, THEME_COOKIE } from "@/lib/appearance";
 import { ACCOUNT_TYPE_LABELS } from "@/lib/labels";
 
 export const metadata: Metadata = { title: "Settings" };
@@ -9,15 +12,23 @@ export const metadata: Metadata = { title: "Settings" };
 export default async function SettingsPage() {
   const session = await requireHousehold();
   const data = getDataSource();
-  const [accounts, categories] = await Promise.all([
+  const [accounts, categories, cookieStore] = await Promise.all([
     data.listAccounts(session.household.id),
     data.listCategories(session.household.id),
+    cookies(),
   ]);
   const memberNames = new Map(session.members.map((member) => [member.id, member.name]));
 
   return (
     <>
       <PageHeader title="Settings" subtitle={session.household.name} />
+
+      <Card className="mb-4" title="Appearance">
+        <AppearancePicker
+          theme={parseTheme(cookieStore.get(THEME_COOKIE)?.value)}
+          mode={parseMode(cookieStore.get(MODE_COOKIE)?.value)}
+        />
+      </Card>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card title="People">
