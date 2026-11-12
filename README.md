@@ -12,6 +12,39 @@ npm install
 npm run demo       # http://localhost:3100 · a made-up household, John & Jane Doe, with a year of data
 ```
 
+## Screenshots
+
+All screenshots are from the built-in demo; every name and number is made up.
+
+**Dashboard:** one month for the whole household, with Everyone / John / Jane / Shared views.
+
+![Dashboard](docs/screenshots/dashboard.jpg)
+
+**Charts:** where the money went, spending pace against a typical month, money in vs. out.
+
+![Charts](docs/screenshots/charts.jpg)
+
+<details>
+<summary>More screenshots: transactions, forecast, dark mode, phone</summary>
+
+**Transactions:** imported from each bank, sorted into categories, with items flagged for review.
+
+![Transactions](docs/screenshots/transactions.jpg)
+
+**Forecast:** how the month is likely to end, and how each number was estimated.
+
+![Forecast](docs/screenshots/forecast.jpg)
+
+**Dark mode**
+
+![Charts in dark mode](docs/screenshots/charts-dark.jpg)
+
+**On a phone**
+
+<img src="docs/screenshots/mobile.jpg" alt="Dashboard on a phone" width="320">
+
+</details>
+
 ## What it does
 
 - **Import from banks** (CSV or Excel): Chase, Bank of America, Truist and
