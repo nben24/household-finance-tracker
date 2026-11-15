@@ -65,15 +65,12 @@ export function PurchaseScatter({
               <g
                 key={purchase.id}
                 className="cursor-pointer"
-                tabIndex={0}
-                role="link"
-                aria-label={`${purchase.merchant}, ${formatCentsRounded(purchase.cents)}, ${formatDay(purchase.date)}`}
+                // Pointer only: keyboard and screen-reader users get every purchase as a linked table below,
+                // instead of one tab stop per dot.
+                aria-hidden="true"
                 onPointerEnter={() => setActive(purchase.id)}
                 onPointerLeave={() => setActive(null)}
-                onFocus={() => setActive(purchase.id)}
-                onBlur={() => setActive(null)}
                 onClick={() => router.push(`/transactions/${purchase.id}`)}
-                onKeyDown={(event) => event.key === "Enter" && router.push(`/transactions/${purchase.id}`)}
               >
                 <circle cx={x(purchase.date)} cy={y(purchase.cents)} r={12} fill="transparent" />
                 <circle
@@ -108,7 +105,9 @@ export function PurchaseScatter({
       </div>
       <TableView
         head={["Purchase", "Date", "Amount"]}
-        rows={purchases.slice(0, 15).map((p) => [p.merchant, formatDay(p.date), formatCentsRounded(p.cents)])}
+        caption={`All ${purchases.length} purchases plotted, largest first`}
+        rows={purchases.map((p) => [p.merchant, formatDay(p.date), formatCentsRounded(p.cents)])}
+        links={purchases.map((p) => `/transactions/${p.id}`)}
       />
     </div>
   );

@@ -1,17 +1,18 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { AiButton, MerchantCard, ReviewStartForm } from "@/components/catch-up/catch-up-controls";
-import { Card, Metric, PageHeader } from "@/components/ui";
+import { Card, MetricTile, PageHeader } from "@/components/ui";
 import { AI_MODEL, isAiConfigured } from "@/lib/ai/categorize-merchants";
 import { merchantsToAsk } from "@/lib/categories/ai-sort";
 import { SORT_SOURCE_LABELS, groupByMerchant, sortSources, spotCheckSample, type SortSource } from "@/lib/categories/catch-up";
 import { alwaysByDefault, findRule } from "@/lib/categories/rules";
 import { categoryGroups } from "@/lib/categories/view";
-import { HOUSEHOLD_TIME_ZONE, WEEK_STARTS_ON } from "@/lib/config";
+import { WEEK_STARTS_ON } from "@/lib/config";
 import { catchUpFilter, getDataSource, requireHousehold } from "@/lib/data";
-import { addDays, formatDay, formatDayWithYear, todayInTimeZone, weekRange } from "@/lib/dates";
+import { addDays, formatDay, formatDayWithYear, weekRange } from "@/lib/dates";
 import { PRIVATE_LABEL, isPrivateNow } from "@/lib/finance/privacy";
 import { formatSignedAmount } from "@/lib/money";
+import { householdToday } from "@/lib/household-time";
 
 export const metadata: Metadata = { title: "Catch-up" };
 
@@ -22,7 +23,7 @@ export default async function CatchUpPage() {
   const session = await requireHousehold();
   const householdId = session.household.id;
   const data = getDataSource();
-  const today = todayInTimeZone(HOUSEHOLD_TIME_ZONE);
+  const today = householdToday(session.household);
   const start = session.household.review_starts_on;
   const suggestedStart = weekRange(today, WEEK_STARTS_ON).from;
 
@@ -81,10 +82,10 @@ export default async function CatchUpPage() {
       </Card>
 
       <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Metric label="History" value={history.total.toLocaleString("en-US")} hint="transactions before the start date" />
-        <Metric label="Sorted" value={sorted.toLocaleString("en-US")} hint="purchases with a category" />
-        <Metric label="Waiting" value={waiting.total.toLocaleString("en-US")} hint="still need a decision" />
-        <Metric label="Merchants" value={String(groups.length)} hint="one decision each" />
+        <MetricTile label="History" value={history.total.toLocaleString("en-US")} hint="transactions before the start date" />
+        <MetricTile label="Sorted" value={sorted.toLocaleString("en-US")} hint="purchases with a category" />
+        <MetricTile label="Waiting" value={waiting.total.toLocaleString("en-US")} hint="still need a decision" />
+        <MetricTile label="Merchants" value={String(groups.length)} hint="one decision each" />
       </div>
 
       {waiting.total > 0 && (

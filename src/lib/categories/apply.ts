@@ -56,6 +56,16 @@ export async function applyRulesToWaiting(
   householdId: string,
   historyBefore: string | null = null,
 ): Promise<number> {
+  return (await applyRulesToWaitingDetailed(data, householdId, historyBefore)).settled;
+}
+
+/** The same, also returning every changed transaction as it was before (for Undo). */
+export async function applyRulesToWaitingDetailed(
+  data: DataSource,
+  householdId: string,
+  historyBefore: string | null = null,
+  options: { except?: string[] } = {},
+): Promise<{ settled: number; changed: TransactionRow[] }> {
   const [rules, categories, waiting] = await Promise.all([
     data.listRules(householdId),
     data.listCategories(householdId),
@@ -64,11 +74,14 @@ export async function applyRulesToWaiting(
 
   // Group identical changes so each group is one database update.
   const groups = new Map<string, { changes: TransactionChanges; ids: string[] }>();
+  const changed: TransactionRow[] = [];
   let settled = 0;
   for (const transaction of waiting.rows) {
+    if (options.except?.includes(transaction.id)) continue;
     const changes = ruleChanges(transaction, categorize(transaction, rules, categories), historyBefore);
     if (!changes) continue;
     if (changes.review_status !== "needs_review") settled += 1;
+    changed.push({ ...transaction }); // as it was, before the update below
     const key = JSON.stringify(changes);
     const group = groups.get(key) ?? { changes, ids: [] };
     group.ids.push(transaction.id);
@@ -78,5 +91,5 @@ export async function applyRulesToWaiting(
   for (const group of groups.values()) {
     await data.updateTransactions(householdId, group.ids, group.changes);
   }
-  return settled;
+  return { settled, changed };
 }

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Icon, MAIN_NAV, type NavItem } from "./nav-items";
+import { Icon, NAV_GROUPS, type NavItem } from "./nav-items";
 
 const MOBILE_NAV: NavItem[] = [
   { href: "/", label: "Home", icon: "home" },
@@ -19,28 +19,39 @@ function isActive(pathname: string, href: string): boolean {
 export function SidebarNav({ reviewCount }: { reviewCount: number }) {
   const pathname = usePathname();
   return (
-    <nav className="flex flex-col gap-1" aria-label="Main">
-      {MAIN_NAV.map((item) => {
-        const active = isActive(pathname, item.href);
-        return (
-          <Link
-            key={item.href}
-            href={item.href}
-            aria-current={active ? "page" : undefined}
-            className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium ${
-              active ? "bg-accent-soft text-accent" : "text-muted hover:bg-bg hover:text-text"
-            }`}
-          >
-            <Icon name={item.icon} />
-            <span className="flex-1">{item.label}</span>
-            {item.href === "/review" && reviewCount > 0 && (
-              <span className="rounded-full bg-notice-soft px-2 py-0.5 text-xs text-notice tabular">
-                {reviewCount}
-              </span>
-            )}
-          </Link>
-        );
-      })}
+    <nav className="flex flex-col gap-4" aria-label="Main">
+      {NAV_GROUPS.map((group) => (
+        <div key={group.label}>
+          <h2 id={`nav-${group.label}`} className="px-3 pb-1 text-xs font-medium text-muted">
+            {group.label}
+          </h2>
+          <ul aria-labelledby={`nav-${group.label}`} className="flex flex-col gap-0.5">
+            {group.items.map((item) => {
+              const active = isActive(pathname, item.href);
+              return (
+                <li key={item.href}>
+                  <Link
+                    href={item.href}
+                    aria-current={active ? "page" : undefined}
+                    className={`flex min-h-9 items-center gap-3 rounded-lg px-3 py-1.5 text-sm font-medium ${
+                      active ? "bg-accent-soft text-accent" : "text-muted hover:bg-bg hover:text-text"
+                    }`}
+                  >
+                    <Icon name={item.icon} />
+                    <span className="flex-1">{item.label}</span>
+                    {item.href === "/review" && reviewCount > 0 && (
+                      <span className="rounded-full bg-notice-soft px-2 py-0.5 text-xs text-notice tabular">
+                        {reviewCount}
+                        <span className="sr-only"> waiting</span>
+                      </span>
+                    )}
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ))}
     </nav>
   );
 }
@@ -64,15 +75,16 @@ export function MobileNav({ reviewCount }: { reviewCount: number }) {
             key={item.href}
             href={item.href}
             aria-current={active ? "page" : undefined}
-            className={`relative flex flex-col items-center gap-1 py-2 text-[11px] font-medium ${
+            className={`relative flex min-h-14 flex-col items-center justify-center gap-1 py-2 text-xs font-medium ${
               active ? "text-accent" : "text-muted"
             }`}
           >
             <Icon name={item.icon} className="h-6 w-6" />
             {item.label}
             {item.href === "/review" && reviewCount > 0 && (
-              <span className="absolute right-[22%] top-1 rounded-full bg-notice-soft px-1.5 text-[10px] text-notice tabular">
+              <span className="absolute right-[22%] top-1 rounded-full bg-notice-soft px-1.5 text-[11px] text-notice tabular">
                 {reviewCount}
+                <span className="sr-only"> waiting</span>
               </span>
             )}
           </Link>

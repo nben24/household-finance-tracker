@@ -50,20 +50,32 @@ All screenshots are from the built-in demo; every name and number is made up.
 - **Import from banks** (CSV or Excel): Chase, Bank of America, Truist and
   American Express layouts, read in the browser. Account-number columns are
   dropped before anything leaves the device, and re-importing the same file
-  never creates duplicates.
+  never creates duplicates. Imports run in visible stages (reading, checking
+  duplicates, saving, sorting); a save that stops partway can simply be retried,
+  and an AI hiccup never makes saved transactions look lost. Your own purchases
+  can be marked private before they're saved.
+- **Account coverage**: each import records the dates it covers ("activity
+  downloaded through November 13"). Averages, budgets and forecasts only learn
+  from months where every account was imported, and the app says which accounts
+  are behind.
 - **Knows what isn't spending**: card payments, transfers between accounts,
   savings moves and investing are recognized and kept out of spending totals.
   Zelle payments between the two people, and money into and out of the joint
   account, are matched from both sides.
 - **Sunday Review**: anything the app wasn't sure about waits for a quick
-  weekly decision; each decision can become a rule for next time. Optional AI
-  (Claude) suggests categories for unfamiliar merchants, sending only merchant
-  names.
+  weekly decision; each decision can become a rule for next time, and the whole
+  decision (rule and everything it sorted) can be undone. Optional AI (Claude)
+  suggests categories for unfamiliar merchants, sending only merchant names.
+- **Split purchases**: one bank transaction divided between categories, to the
+  cent; refunds can be linked to the purchase and the parts they reverse.
 - **Four views of every page**: Everyone, each person, and Shared. Paying each
   other back moves spending between people without changing the household total.
 - **Dashboard, budgets and reports**: income, spending, saved & invested, and
   what's left over, by week or month; budgets per category and per person,
   including sinking funds; month-by-category reports with CSV export.
+- **Month-end review**: check coverage, remaining decisions, budget against
+  actual and balances, then download an exact-cent ledger, a category summary
+  or a versioned JSON backup.
 - **Recurring bills and subscriptions** detected from history, with price changes.
 - **Forecast** for this month and next from explainable baselines (no black box):
   bills still to come, expected paychecks, usual everyday spending, and a range.
@@ -79,8 +91,9 @@ All screenshots are from the built-in demo; every name and number is made up.
   and server actions, no separate backend.
 - **Supabase (Postgres + Auth)** with **Row Level Security** on every table and
   composite foreign keys, so one household can never read or point at another's data.
-- **312 tests (Vitest)**, including database tests that run the real migrations
-  in PGlite (in-process Postgres) and check the security policies.
+- **419 tests (Vitest)**, including database tests that run the real migrations
+  in PGlite (in-process Postgres) and check the security policies, and server
+  actions run end to end against an in-memory data source with injected failures.
 - **Deterministic synthetic data generator** that powers the demo, the seed
   script and the tests.
 - All money maths in pure, tested functions; amounts handled in cents.
@@ -183,7 +196,7 @@ Copy `.env.example` to `.env.local`.
 | `SUPABASE_SERVICE_ROLE_KEY` | setup scripts only | Bypasses security. Keep it on your machine; do not add it to Vercel |
 | `ANTHROPIC_API_KEY` | app + `npm run ai:check` | Optional. Enables AI sorting of unfamiliar merchants. Server-only; add to Vercel too |
 | `SEED_USER_PASSWORD`, `SEED_PERSON1_NAME`, `SEED_PERSON1_EMAIL`, `SEED_PERSON2_NAME`, `SEED_PERSON2_EMAIL`, `SEED_HOUSEHOLD_NAME` | setup scripts | Logins and household to create |
-| `HOUSEHOLD_TIME_ZONE` | app | Defines "today" and "this week". Default `America/New_York` |
+| `HOUSEHOLD_TIME_ZONE` | app | Fallback for "today" until the household calendar update is applied; after that the time zone is stored on the household (Settings). Also the seed's default. Default `America/New_York` |
 | `HOUSEHOLD_WEEK_STARTS_ON` | app | `sunday` (default) or `monday`. Sunday Review opens on the week containing yesterday |
 | `HOUSEHOLD_OTHER_ALERT_DOLLARS` | app | Point out "Other" spending above this many dollars a month. Default 200 |
 | `HOUSEHOLD_SHARED_SPENDING_IN_PERSONAL` | app | `separate` (default): shared bills stay under Shared. `split`: each person's view includes an equal share |
@@ -204,7 +217,12 @@ Copy `.env.example` to `.env.local`.
    way, in filename order: `…_initial_schema.sql`, `…_import_fingerprint.sql`,
    `…_categorization_rules.sql`, `…_budgets.sql`, `…_catch_up_and_ai.sql`,
    `…_manual_transactions.sql`, `…_recurring_overrides.sql`, `…_net_worth.sql`,
-   `…_private_transactions.sql`, `…_income_sources.sql`.
+   `…_private_transactions.sql`, `…_income_sources.sql`,
+   `…_household_calendar.sql`, `…_account_coverage.sql`, `…_account_closing.sql`,
+   `…_budget_versions.sql`, `…_import_batches.sql`, `…_transaction_splits.sql`,
+   `…_review_undo.sql`, `…_month_closings.sql`.
+   After `…_household_calendar.sql`, check the household's time zone in
+   Settings → Household calendar (it starts as `America/New_York`).
 3. **Turn off public sign-ups**: Authentication → Sign In / Providers → disable
    "Allow new users to sign up". Logins are created by the setup script.
 4. **Allow the email-link landing page**: Authentication → URL Configuration →
@@ -417,7 +435,10 @@ last date automatically; only that one number is sent, not per-row balances.
 The Net Worth page works per view (Everyone, each person's own accounts, the
 shared ones), shows owned/owed/net and the change since last month, a
 month-by-month history (month-end balances), flags balances older than 45 days,
-and lets accounts be retired (closed, sold, paid off) without losing history.
+and lets accounts be retired (closed, sold, paid off) without losing history:
+retiring asks for the closing date, and the account counts in net worth only
+before it, so earlier months never change. Retiring doesn't record sale
+proceeds or a payoff; those show up in the account the money moved through.
 Logic: `src/lib/finance/net-worth.ts`.
 
 ## Private transactions
@@ -426,7 +447,10 @@ A person can keep one of their own purchases or refunds private — say, a
 present — optionally until a date. This is enforced by Row Level Security
 (`can_see_transaction`), not the app: the other member's queries don't return
 the row, so their lists, totals, budgets, reports and recurring charges are all
-computed without it. On the reveal date it becomes visible again automatically.
+computed without it. On the reveal date it becomes visible again automatically
+— from midnight on that date in the household's time zone, which the database
+and the app read from the same place. A private hand-added entry stays private
+when its bank version arrives, and so do its split parts and a linked refund.
 The owner still sees and counts it, but lists, Sunday Review and Catch-up show
 it as "Private purchase" in case a screen is shared. Private purchases never
 teach sorting rules (rules are shared) and are never sent to the AI. The control
@@ -517,5 +541,12 @@ funds, versioning, overlap rules), month and week periods,
 and — against real Postgres via PGlite — the schema constraints and household
 isolation.
 
-Not covered by automated tests: the live Supabase sign-in flows and the
-screens themselves (import, review, settings), which need a browser.
+Also covered: account coverage and complete months, the household calendar
+across midnight and daylight-saving changes, retiring accounts without
+changing history, budget changes in one database step (including refusing a
+stale edit), the staged import (retries, partial saves, privacy before saving,
+match answers), split purchases in every total, review Undo, the ledger and the
+backup round trip.
+
+Not covered by automated tests: the live Supabase sign-in flows. Screens were
+checked in a browser against the demo (see `docs/implementation-checklist.md`).

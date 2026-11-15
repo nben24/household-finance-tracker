@@ -6,13 +6,13 @@ import { PurchaseScatter } from "@/components/charts/purchase-scatter";
 import { SpendingDonut } from "@/components/charts/spending-donut";
 import { Card, PageHeader, Stepper } from "@/components/ui";
 import { ViewSwitcher } from "@/components/view-switcher";
-import { HOUSEHOLD_TIME_ZONE } from "@/lib/config";
 import { requireHousehold } from "@/lib/data";
-import { addMonths, formatMonth, isMonthKey, monthKey, todayInTimeZone } from "@/lib/dates";
+import { addMonths, formatMonth, isMonthKey, monthKey } from "@/lib/dates";
 import { flowSentence, OTHER, paceSentence, purchasesSentence, slicesSentence } from "@/lib/finance/charts";
 import { loadCharts } from "@/lib/finance/load-charts";
 import { parseView, viewLabel, viewParam, viewPersonFilter } from "@/lib/finance/view-param";
 import { firstParam, queryString } from "@/lib/params";
+import { householdToday } from "@/lib/household-time";
 
 export const metadata: Metadata = { title: "Charts" };
 
@@ -26,7 +26,7 @@ function Reading({ children }: { children: string }) {
 export default async function ChartsPage({ searchParams }: PageProps<"/charts">) {
   const session = await requireHousehold();
   const params = await searchParams;
-  const today = todayInTimeZone(HOUSEHOLD_TIME_ZONE);
+  const today = householdToday(session.household);
   const thisMonth = monthKey(today);
   const requested = firstParam(params.month) ?? "";
   const month = isMonthKey(requested) && requested <= thisMonth ? requested : thisMonth;
@@ -47,6 +47,7 @@ export default async function ChartsPage({ searchParams }: PageProps<"/charts">)
     <>
       <PageHeader title="Charts" subtitle={`${viewLabel(view, session.members)} · ${session.household.name}`}>
         <Stepper
+          showLabel
           label={formatMonth(month)}
           previousHref={query({ month: addMonths(month, -1) })}
           nextHref={

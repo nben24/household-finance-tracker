@@ -20,17 +20,38 @@ export function holdsTransactions(type: AccountType): boolean {
 /** A balance older than this is pointed out as possibly out of date. */
 export const STALE_AFTER_DAYS = 45;
 
-type Account = Pick<AccountRow, "id" | "account_type" | "owner_user_id" | "is_active">;
+type Account = Pick<AccountRow, "id" | "account_type" | "owner_user_id" | "is_active"> &
+  Partial<Pick<AccountRow, "closed_on">>;
 type Balance = Pick<AccountBalanceRow, "account_id" | "as_of" | "balance">;
 
-/** Accounts that belong in a view: everything, one person's own, or the joint ones. */
+/**
+ * Accounts that belong in a view: everything, one person's own, or the joint
+ * ones, including retired ones (they still count on dates before they closed).
+ * Use activeAccounts for what's listed today.
+ */
 export function accountsForView<T extends Account>(accounts: T[], view: View): T[] {
   return accounts.filter(
     (account) =>
-      account.is_active &&
-      (view.kind === "everyone" ||
-        (view.kind === "shared" ? account.owner_user_id === null : account.owner_user_id === view.personId)),
+      view.kind === "everyone" ||
+      (view.kind === "shared" ? account.owner_user_id === null : account.owner_user_id === view.personId),
   );
+}
+
+/** Accounts listed as current (not retired). */
+export function activeAccounts<T extends Account>(accounts: T[]): T[] {
+  return accounts.filter((account) => account.is_active);
+}
+
+/**
+ * Whether an account counts in net worth on a date:
+ * - open accounts always do (from their first balance);
+ * - an account closed, sold or paid off counts only before its closing date;
+ * - one retired before closing dates were recorded counts through its last balance.
+ */
+export function countsOn(account: Account, date: string, lastBalanceDate: string | null): boolean {
+  if (account.closed_on) return date < account.closed_on;
+  if (account.is_active) return true;
+  return lastBalanceDate !== null && date <= lastBalanceDate;
 }
 
 /** Each account's most recent balance on or before `date`. */
@@ -54,19 +75,30 @@ export interface NetWorth {
   stale: string[];
 }
 
+function lastBalanceDates(balances: Balance[]): Map<string, string> {
+  const last = new Map<string, string>();
+  for (const balance of balances) {
+    const current = last.get(balance.account_id);
+    if (!current || balance.as_of > current) last.set(balance.account_id, balance.as_of);
+  }
+  return last;
+}
+
 export function netWorthOn(accounts: Account[], balances: Balance[], date: string): NetWorth {
   const latest = balancesOn(balances, date);
+  const lastDates = lastBalanceDates(balances);
   let assetsCents = 0;
   let debtsCents = 0;
   const missing: string[] = [];
   const stale: string[] = [];
   for (const account of accounts) {
+    if (!countsOn(account, date, lastDates.get(account.id) ?? null)) continue;
     const balance = latest.get(account.id);
     if (!balance) {
       missing.push(account.id);
       continue;
     }
-    if (daysBetween(balance.as_of, date) > STALE_AFTER_DAYS) stale.push(account.id);
+    if (account.is_active && daysBetween(balance.as_of, date) > STALE_AFTER_DAYS) stale.push(account.id);
     if (isDebt(account.account_type)) debtsCents += toCents(balance.balance);
     else assetsCents += toCents(balance.balance);
   }
@@ -75,8 +107,9 @@ export function netWorthOn(accounts: Account[], balances: Balance[], date: strin
 
 /**
  * Net worth at the end of each of the last `count` months (the current month
- * as of today). An account counts from its first balance onward; months before
- * any balance existed are left out rather than shown as zero.
+ * as of today). An account counts from its first balance onward and, once
+ * retired, only before its closing date, so retiring never changes earlier
+ * months. Months before any balance existed are left out rather than shown as zero.
  */
 export function monthlyHistory(
   accounts: Account[],

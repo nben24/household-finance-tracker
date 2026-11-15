@@ -4,8 +4,7 @@ import { formatDay } from "@/lib/dates";
 import type { AccountRow, CategoryRow, TransactionRow } from "@/lib/db/types";
 import { TRANSACTION_TYPE_LABELS } from "@/lib/labels";
 import { formatSignedAmount } from "@/lib/money";
-import { HOUSEHOLD_TIME_ZONE } from "@/lib/config";
-import { todayInTimeZone } from "@/lib/dates";
+import { isSplit } from "@/lib/finance/allocations";
 import { PRIVATE_LABEL, isPrivateNow } from "@/lib/finance/privacy";
 
 export interface Lookups {
@@ -27,6 +26,7 @@ export function buildLookups(
 }
 
 function categoryLabel(transaction: TransactionRow, lookups: Lookups): string | null {
+  if (isSplit(transaction)) return `Split · ${transaction.splits!.length} categories`;
   const category = transaction.category_id && lookups.categories.get(transaction.category_id);
   if (!category) return null;
   const subcategory = transaction.subcategory_id && lookups.categories.get(transaction.subcategory_id);
@@ -75,82 +75,91 @@ export function TransactionList({
   transactions,
   lookups,
   empty = "No transactions here.",
+  today,
 }: {
   transactions: TransactionRow[];
   lookups: Lookups;
   empty?: string;
+  /** the household's date, for deciding which private purchases are still masked */
+  today: string;
 }) {
   if (transactions.length === 0) return <p className="text-sm text-muted">{empty}</p>;
-  const today = todayInTimeZone(HOUSEHOLD_TIME_ZONE);
 
   return (
     <>
-      {/* Phone: stacked rows */}
-      <ul className="divide-y divide-line md:hidden">
+      {/* Phone: each row is one tap target */}
+      <ul className="divide-y divide-line lg:hidden">
         {transactions.map((transaction) => {
           const info = describe(transaction, lookups, today);
           return (
-            <li key={transaction.id} className="flex items-start justify-between gap-3 py-3">
-              <Link href={`/transactions/${transaction.id}`} className="min-w-0">
-                <p className="truncate text-sm font-medium">{info.merchant}</p>
-                <div className="mt-0.5 text-xs text-muted">
-                  <CategoryCell info={info} />
-                </div>
-                <p className="mt-0.5 text-xs text-muted">
-                  {formatDay(transaction.transaction_date)} · {info.person}
-                </p>
-              </Link>
-              <div className="flex shrink-0 flex-col items-end gap-1">
-                <span className={`text-sm font-medium tabular ${info.amountClass}`}>
-                  {formatSignedAmount(transaction.amount)}
+            <li key={transaction.id}>
+              <Link
+                href={`/transactions/${transaction.id}`}
+                className="-mx-2 flex items-start justify-between gap-3 rounded-lg px-2 py-3 hover:bg-bg"
+              >
+                <span className="min-w-0">
+                  <span className="block break-anywhere text-sm font-medium">{info.merchant}</span>
+                  <span className="mt-0.5 block text-[13px] text-muted">
+                    <CategoryCell info={info} />
+                  </span>
+                  <span className="mt-0.5 block text-xs text-muted">
+                    {formatDay(transaction.transaction_date)} · {info.person}
+                  </span>
                 </span>
-                {info.needsReview && <Badge tone="notice">Needs review</Badge>}
-                {info.manual && <Badge tone="plain">{info.manual}</Badge>}
-              </div>
+                <span className="flex shrink-0 flex-col items-end gap-1">
+                  <span className={`text-sm font-semibold tabular ${info.amountClass}`}>
+                    {formatSignedAmount(transaction.amount)}
+                  </span>
+                  {info.needsReview && <Badge tone="notice">Needs review</Badge>}
+                  {info.manual && <Badge tone="plain">{info.manual}</Badge>}
+                </span>
+              </Link>
             </li>
           );
         })}
       </ul>
 
       {/* Larger screens: table */}
-      <div className="hidden overflow-x-auto md:block">
+      <div className="hidden overflow-x-auto lg:block">
         <table className="w-full text-left text-sm">
           <thead>
-            <tr className="border-b border-line text-xs uppercase tracking-wide text-muted">
-              <th className="py-2 pr-4 font-medium">Date</th>
-              <th className="py-2 pr-4 font-medium">Merchant</th>
-              <th className="py-2 pr-4 font-medium">Category</th>
-              <th className="py-2 pr-4 font-medium">Person</th>
-              <th className="py-2 pr-4 font-medium">Account</th>
-              <th className="py-2 text-right font-medium">Amount</th>
+            <tr className="border-b border-line text-xs text-muted">
+              <th scope="col" className="py-2 pr-4 font-medium">Date</th>
+              <th scope="col" className="py-2 pr-4 font-medium">Merchant</th>
+              <th scope="col" className="py-2 pr-4 font-medium">Category</th>
+              <th scope="col" className="py-2 pr-4 text-right font-medium">Amount</th>
+              <th scope="col" className="py-2 pr-4 font-medium">Person</th>
+              <th scope="col" className="py-2 font-medium">Account</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-line">
             {transactions.map((transaction) => {
               const info = describe(transaction, lookups, today);
               return (
-                <tr key={transaction.id} className="align-top">
+                <tr key={transaction.id} className="align-top hover:bg-bg">
                   <td className="whitespace-nowrap py-2.5 pr-4 text-muted tabular">
                     {formatDay(transaction.transaction_date)}
                   </td>
                   <td className="py-2.5 pr-4">
                     <span className="flex flex-wrap items-center gap-2 font-medium">
-                      <Link href={`/transactions/${transaction.id}`} className="hover:underline">
+                      <Link href={`/transactions/${transaction.id}`} className="break-anywhere text-accent hover:underline">
                         {info.merchant}
                       </Link>
                       {info.needsReview && <Badge tone="notice">Needs review</Badge>}
                       {info.manual && <Badge tone="plain">{info.manual}</Badge>}
                     </span>
-                    <span className="block text-xs text-muted">{info.description}</span>
+                    <span className="block max-w-xs truncate text-xs text-muted" title={info.description}>
+                      {info.description}
+                    </span>
                   </td>
                   <td className="py-2.5 pr-4">
                     <CategoryCell info={info} />
                   </td>
-                  <td className="py-2.5 pr-4 text-muted">{info.person}</td>
-                  <td className="py-2.5 pr-4 text-muted">{info.account}</td>
-                  <td className={`whitespace-nowrap py-2.5 text-right font-medium tabular ${info.amountClass}`}>
+                  <td className={`whitespace-nowrap py-2.5 pr-4 text-right font-semibold tabular ${info.amountClass}`}>
                     {formatSignedAmount(transaction.amount)}
                   </td>
+                  <td className="py-2.5 pr-4 text-muted">{info.person}</td>
+                  <td className="break-anywhere py-2.5 text-[13px] text-muted">{info.account}</td>
                 </tr>
               );
             })}

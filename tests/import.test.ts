@@ -362,6 +362,7 @@ describe("preparing rows to save", () => {
     account_type: type,
     last_four: null,
     is_active: true,
+    closed_on: null,
     created_at: "2026-10-01T00:00:00Z",
   });
   const CARD = "22222222-2222-4222-8222-222222222222";

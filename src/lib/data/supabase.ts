@@ -1,5 +1,9 @@
 import "server-only";
 import type {
+  MonthClosingRow,
+  SplitRow,
+  AccountCoverageRow,
+  ImportBatchRow,
   IncomeSourceRow,
   AccountBalanceRow,
   AccountRow,
@@ -12,8 +16,9 @@ import type {
   ProfileRow,
   TransactionRow,
 } from "@/lib/db/types";
+import { SHARED_SPENDING_MODE } from "@/lib/config";
 import { createClient } from "@/lib/supabase/server";
-import type { DataSource, Member, Page, TransactionFilter } from "./types";
+import { BudgetError, SplitError, UndoError, type DataSource, type Member, type Page, type TransactionFilter } from "./types";
 
 const FETCH_ALL_CHUNK = 1000;
 const INSERT_CHUNK = 500;
@@ -26,9 +31,35 @@ function fail(action: string, error: { message: string }): never {
   throw new Error(`Could not ${action}: ${error.message}`);
 }
 
+/** Turns the budget functions' refusals into BudgetError; a missing function means the database needs its update. */
+function budgetFailure(action: string, error: { message: string; code?: string }): never {
+  if (error.code === "PGRST202" || error.code === "42883") throw new Error(MISSING_MIGRATION);
+  for (const reason of ["conflict", "stale", "not_found"] as const) {
+    if (error.message.includes(`budget_${reason}`)) throw new BudgetError(reason);
+  }
+  fail(action, error);
+}
+
 /** Keep only characters that are safe inside a PostgREST `or` filter. */
 export function sanitizeSearch(search: string): string {
   return search.replace(/[^\p{L}\p{N} '&.\-]/gu, " ").trim().slice(0, 80);
+}
+
+// Split parts are loaded with their transaction. Until the split-purchases
+// update is applied the relationship doesn't exist; then rows load without them.
+let splitsAvailable = true;
+const WITH_SPLITS = "*, transaction_splits(*)";
+
+function withSplits(row: Record<string, unknown>): TransactionRow {
+  const { transaction_splits: parts, ...rest } = row as Record<string, unknown> & { transaction_splits?: SplitRow[] };
+  const splits = (parts ?? [])
+    .map((part) => ({ ...part, amount: Number(part.amount) }))
+    .sort((a, b) => a.position - b.position);
+  return { ...(rest as unknown as TransactionRow), amount: Number(rest.amount), ...(splits.length > 0 ? { splits } : {}) };
+}
+
+function isMissingRelation(error: { code?: string }) {
+  return error.code === "PGRST200" || error.code === "42P01" || error.code === "PGRST205";
 }
 
 async function fetchTransactions(
@@ -37,11 +68,31 @@ async function fetchTransactions(
   page: Page,
   { withTotal = true }: { withTotal?: boolean } = {},
 ): Promise<{ rows: TransactionRow[]; total: number }> {
+  try {
+    return await fetchTransactionsOnce(householdId, filter, page, withTotal, splitsAvailable);
+  } catch (error) {
+    if (splitsAvailable && error instanceof MissingSplits) {
+      splitsAvailable = false;
+      return fetchTransactionsOnce(householdId, filter, page, withTotal, false);
+    }
+    throw error;
+  }
+}
+
+class MissingSplits extends Error {}
+
+async function fetchTransactionsOnce(
+  householdId: string,
+  filter: TransactionFilter,
+  page: Page,
+  withTotal: boolean,
+  includeSplits: boolean,
+): Promise<{ rows: TransactionRow[]; total: number }> {
   const supabase = await createClient();
   let query = supabase
     .from("transactions")
     // Counting every match is extra work for the database; only a page needs the total.
-    .select("*", withTotal ? { count: "exact" } : undefined)
+    .select(includeSplits ? WITH_SPLITS : "*", withTotal ? { count: "exact" } : undefined)
     .eq("household_id", householdId);
 
   if (filter.from) query = query.gte("transaction_date", filter.from);
@@ -52,6 +103,7 @@ async function fetchTransactions(
   else if (filter.personId) query = query.eq("person_id", filter.personId);
   if (filter.needsReview) query = query.eq("review_status", "needs_review");
   if (filter.awaitingPost) query = query.eq("awaiting_post", true);
+  if (filter.importBatchId) query = query.eq("import_batch_id", filter.importBatchId);
   const search = filter.search ? sanitizeSearch(filter.search) : "";
   if (search) {
     query = query.or(
@@ -67,9 +119,12 @@ async function fetchTransactions(
     .order("transaction_date", { ascending: sort === "oldest" })
     .order("id", { ascending: true })
     .range(page.offset, page.offset + page.limit - 1);
-  if (error) fail("load transactions", error);
+  if (error) {
+    if (includeSplits && isMissingRelation(error)) throw new MissingSplits();
+    fail("load transactions", error);
+  }
 
-  const rows = (data as TransactionRow[]).map((row) => ({ ...row, amount: Number(row.amount) }));
+  const rows = (data as unknown as Record<string, unknown>[]).map(withSplits);
   return { rows, total: count ?? rows.length };
 }
 
@@ -232,14 +287,75 @@ export const supabaseDataSource: DataSource = {
 
   async getTransaction(householdId, id) {
     const supabase = await createClient();
-    const { data, error } = await supabase
-      .from("transactions")
-      .select("*")
-      .eq("household_id", householdId)
-      .eq("id", id)
-      .maybeSingle();
+    const load = (columns: string) =>
+      supabase.from("transactions").select(columns).eq("household_id", householdId).eq("id", id).maybeSingle();
+    let { data, error } = await load(splitsAvailable ? WITH_SPLITS : "*");
+    if (error && splitsAvailable && isMissingRelation(error)) {
+      splitsAvailable = false;
+      ({ data, error } = await load("*"));
+    }
     if (error) fail("load the transaction", error);
-    return data ? { ...(data as TransactionRow), amount: Number(data.amount) } : null;
+    return data ? withSplits(data as unknown as Record<string, unknown>) : null;
+  },
+
+  async transactionsByIds(householdId, ids) {
+    const supabase = await createClient();
+    const rows: TransactionRow[] = [];
+    for (let start = 0; start < ids.length; start += UPDATE_CHUNK) {
+      const { data, error } = await supabase
+        .from("transactions")
+        .select(splitsAvailable ? WITH_SPLITS : "*")
+        .eq("household_id", householdId)
+        .in("id", ids.slice(start, start + UPDATE_CHUNK));
+      if (error) fail("load transactions", error);
+      rows.push(...(data as unknown as Record<string, unknown>[]).map(withSplits));
+    }
+    return rows;
+  },
+
+  async recordReviewOperation(householdId, operation) {
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from("review_operations")
+      .insert({ ...operation, household_id: householdId })
+      .select("id")
+      .single();
+    if (error) {
+      if (error.code === "42P01" || error.code === "PGRST205") throw new Error(MISSING_MIGRATION);
+      fail("remember the decision", error);
+    }
+    return (data as { id: string }).id;
+  },
+
+  async undoReviewOperation(householdId, id) {
+    const supabase = await createClient();
+    const { error } = await supabase.rpc("undo_review_operation", { target_operation_id: id });
+    if (error) {
+      if (error.code === "PGRST202" || error.code === "42883") throw new Error(MISSING_MIGRATION);
+      if (error.message.includes("undo_conflict")) throw new UndoError("conflict");
+      if (error.message.includes("undo_gone")) throw new UndoError("gone");
+      fail("undo the decision", error);
+    }
+  },
+
+  async saveSplits(householdId, transactionId, parts) {
+    const supabase = await createClient();
+    const { error } = await supabase.rpc("save_transaction_splits", {
+      target_transaction_id: transactionId,
+      splits: parts.map((part) => ({
+        category_id: part.category_id,
+        subcategory_id: part.subcategory_id ?? "",
+        amount: part.amount,
+        note: part.note ?? "",
+        refund_of_split_id: part.refund_of_split_id ?? "",
+      })),
+    });
+    if (error) {
+      if (error.code === "PGRST202" || error.code === "42883") throw new Error(MISSING_MIGRATION);
+      const reason = /split_(not_found|kind|count|sign|total)/.exec(error.message)?.[1];
+      if (reason) throw new SplitError(reason as SplitError["reason"]);
+      fail("save the split", error);
+    }
   },
 
   async updateTransactions(householdId, ids, changes) {
@@ -354,20 +470,35 @@ export const supabaseDataSource: DataSource = {
 
   async createBudgetLine(householdId, line) {
     const supabase = await createClient();
-    const { error } = await supabase.from("budget_lines").insert({ ...line, household_id: householdId });
-    if (error) fail("save the budget", error);
+    const { error } = await supabase.rpc("create_budget_line", {
+      target_household_id: householdId,
+      new_scope: line.scope,
+      new_person_id: line.person_id,
+      new_category_id: line.category_id,
+      new_subcategory_id: line.subcategory_id,
+      new_kind: line.kind,
+      new_amount: line.amount,
+      from_month: line.starts_month,
+      split_mode: SHARED_SPENDING_MODE === "split",
+    });
+    if (error) budgetFailure("save the budget", error);
   },
 
-  async updateBudgetLine(householdId, id, changes) {
+  async changeBudgetLine(householdId, id, fromMonth, changes) {
     const supabase = await createClient();
-    const { error } = await supabase.from("budget_lines").update(changes).eq("household_id", householdId).eq("id", id);
-    if (error) fail("save the budget", error);
+    const { error } = await supabase.rpc("change_budget_line", {
+      target_line_id: id,
+      from_month: `${fromMonth}-01`,
+      new_amount: changes.amount,
+      new_kind: changes.kind,
+    });
+    if (error) budgetFailure("save the budget", error);
   },
 
-  async deleteBudgetLine(householdId, id) {
+  async endBudgetLine(householdId, id, fromMonth) {
     const supabase = await createClient();
-    const { error } = await supabase.from("budget_lines").delete().eq("household_id", householdId).eq("id", id);
-    if (error) fail("remove the budget", error);
+    const { error } = await supabase.rpc("end_budget_line", { target_line_id: id, from_month: `${fromMonth}-01` });
+    if (error) budgetFailure("remove the budget", error);
   },
 
   async updateHouseholdSettings(householdId, changes) {
@@ -388,16 +519,21 @@ export const supabaseDataSource: DataSource = {
 
   async replaceManualEntry(householdId, id, row) {
     const supabase = await createClient();
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("transactions")
       .update(row)
       .eq("household_id", householdId)
       .eq("id", id)
-      .eq("is_manual", true);
+      .eq("is_manual", true)
+      .eq("awaiting_post", true)
+      .select("id");
     if (error) {
       if (error.code === "42703" || error.code === "PGRST204") throw new Error(MISSING_MIGRATION);
+      // The bank row's fingerprint is already saved (another import got there first).
+      if (error.code === "23505") return false;
       fail("match the transaction", error);
     }
+    return data.length > 0;
   },
 
   async listRecurringOverrides(householdId) {
@@ -498,5 +634,129 @@ export const supabaseDataSource: DataSource = {
     const supabase = await createClient();
     const { error } = await supabase.from("income_sources").delete().eq("household_id", householdId).eq("id", id);
     if (error) fail("remove expected income", error);
+  },
+
+  async startImportBatch(householdId, batch) {
+    const supabase = await createClient();
+    const { error } = await supabase
+      .from("import_batches")
+      .upsert({ ...batch, household_id: householdId }, { onConflict: "id", ignoreDuplicates: true });
+    if (error) {
+      if (error.code === "42P01" || error.code === "PGRST205") throw new Error(MISSING_MIGRATION);
+      fail("start the import", error);
+    }
+    const saved = await supabaseDataSource.getImportBatch(householdId, batch.id);
+    // Someone else's batch with this id (or another household's) is invisible here.
+    if (!saved) throw new Error("Could not start the import: unknown batch");
+    return saved;
+  },
+
+  async getImportBatch(householdId, id) {
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from("import_batches")
+      .select("*")
+      .eq("household_id", householdId)
+      .eq("id", id)
+      .maybeSingle();
+    if (error) {
+      if (error.code === "42P01" || error.code === "PGRST205") return null;
+      fail("load the import", error);
+    }
+    return (data as ImportBatchRow | null) ?? null;
+  },
+
+  async updateImportBatch(householdId, id, changes) {
+    const supabase = await createClient();
+    const { error } = await supabase.from("import_batches").update(changes).eq("household_id", householdId).eq("id", id);
+    if (error) fail("update the import", error);
+  },
+
+  async unfinishedImport(householdId) {
+    const supabase = await createClient();
+    const { data: auth } = await supabase.auth.getClaims();
+    const { data, error } = await supabase
+      .from("import_batches")
+      .select("*")
+      .eq("household_id", householdId)
+      .eq("user_id", auth?.claims?.sub ?? "")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) {
+      if (error.code === "42P01" || error.code === "PGRST205") return null;
+      fail("load the last import", error);
+    }
+    const batch = data as ImportBatchRow | null;
+    return batch && batch.status !== "sorted" ? batch : null;
+  },
+
+  async getMonthClosing(householdId, month) {
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from("month_closings")
+      .select("*")
+      .eq("household_id", householdId)
+      .eq("month", `${month}-01`)
+      .maybeSingle();
+    if (error) {
+      if (error.code === "42P01" || error.code === "PGRST205") return null;
+      fail("load the month's review", error);
+    }
+    const row = data as MonthClosingRow | null;
+    return row ? { ...row, spending_cents: Number(row.spending_cents), income_cents: Number(row.income_cents) } : null;
+  },
+
+  async saveMonthClosing(householdId, closing) {
+    const supabase = await createClient();
+    const { data: auth } = await supabase.auth.getClaims();
+    const { error } = await supabase.from("month_closings").upsert(
+      {
+        ...closing,
+        month: `${closing.month}-01`,
+        household_id: householdId,
+        closed_by: auth?.claims?.sub ?? null,
+        closed_at: new Date().toISOString(),
+      },
+      { onConflict: "household_id,month" },
+    );
+    if (error) {
+      if (error.code === "42P01" || error.code === "PGRST205") throw new Error(MISSING_MIGRATION);
+      fail("close the month", error);
+    }
+  },
+
+  async listCoverage(householdId) {
+    const supabase = await createClient();
+    const rows: AccountCoverageRow[] = [];
+    for (let offset = 0; ; offset += FETCH_ALL_CHUNK) {
+      const { data, error } = await supabase
+        .from("account_coverage")
+        .select("*")
+        .eq("household_id", householdId)
+        .order("covered_from")
+        .order("id")
+        .range(offset, offset + FETCH_ALL_CHUNK - 1);
+      if (error) {
+        // Before the coverage update is applied, nothing is known about coverage.
+        if (error.code === "42P01" || error.code === "PGRST205") return [];
+        fail("load account coverage", error);
+      }
+      rows.push(...(data as AccountCoverageRow[]));
+      if (data.length < FETCH_ALL_CHUNK) break;
+    }
+    return rows;
+  },
+
+  async recordCoverage(householdId, period) {
+    const supabase = await createClient();
+    const { data: auth } = await supabase.auth.getClaims();
+    const { error } = await supabase
+      .from("account_coverage")
+      .insert({ ...period, household_id: householdId, recorded_by: auth?.claims?.sub ?? null });
+    if (error) {
+      if (error.code === "42P01" || error.code === "PGRST205") throw new Error(MISSING_MIGRATION);
+      fail("record what was imported", error);
+    }
   },
 };

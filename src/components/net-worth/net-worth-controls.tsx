@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { addNetWorthAccount, removeBalance, setAccountActive, updateBalance } from "@/app/(app)/net-worth/actions";
+import { addNetWorthAccount, removeBalance, restoreAccount, retireAccount, updateBalance } from "@/app/(app)/net-worth/actions";
 import {
   Feedback,
   inputClass,
@@ -35,14 +35,20 @@ export function BalanceControls({
 }) {
   const { pending, error, message, run } = useSettingsAction();
   const [open, setOpen] = useState(false);
+  const [retiring, setRetiring] = useState(false);
   const [balance, setBalance] = useState("");
   const [asOf, setAsOf] = useState(today);
+  const [closedOn, setClosedOn] = useState(today);
+  const [finalBalance, setFinalBalance] = useState("");
 
   if (!active) {
     return (
-      <button type="button" disabled={pending} onClick={() => run(() => setAccountActive({ accountId, active: true }))} className={smallButton}>
-        Restore
-      </button>
+      <div className="text-right">
+        <button type="button" disabled={pending} onClick={() => run(() => restoreAccount({ accountId }))} className={smallButton}>
+          Restore
+        </button>
+        <Feedback error={error} message={message} />
+      </div>
     );
   }
 
@@ -110,14 +116,59 @@ export function BalanceControls({
               ))}
             </ul>
           )}
-          <button
-            type="button"
-            disabled={pending}
-            onClick={() => run(() => setAccountActive({ accountId, active: false }))}
-            className="mt-3 text-xs font-medium text-muted hover:text-text"
-          >
-            Closed, sold or paid off? Retire this account
-          </button>
+          {!retiring ? (
+            <button
+              type="button"
+              onClick={() => setRetiring(true)}
+              className="mt-3 min-h-9 text-xs font-medium text-muted hover:text-text"
+            >
+              Closed, sold or paid off? Retire this account
+            </button>
+          ) : (
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                run(() => retireAccount({ accountId, closedOn, finalBalance }), () => setRetiring(false));
+              }}
+              className="mt-3 flex flex-col gap-2 border-t border-line pt-3"
+            >
+              <label className="text-xs font-medium text-muted">
+                Closed, sold, or paid off on what date?
+                <input
+                  type="date"
+                  required
+                  value={closedOn}
+                  max={today}
+                  onChange={(event) => setClosedOn(event.target.value)}
+                  className={`mt-1 block ${inputClass} py-1`}
+                />
+              </label>
+              <label className="text-xs font-medium text-muted">
+                Last balance before it closed (optional)
+                <span className="mt-1 flex items-center gap-1 text-sm text-text">
+                  $
+                  <input
+                    value={finalBalance}
+                    onChange={(event) => setFinalBalance(event.target.value)}
+                    inputMode="decimal"
+                    className={`w-32 ${inputClass} py-1`}
+                  />
+                </span>
+              </label>
+              <p className="text-xs text-muted">
+                It stops counting from this date; earlier months keep it. Retiring doesn&apos;t record what a sale brought
+                in or a loan payoff — those show up in the account the money went to or came from.
+              </p>
+              <div className="flex gap-2">
+                <button type="submit" disabled={pending} className={smallButton}>
+                  Retire account
+                </button>
+                <button type="button" onClick={() => setRetiring(false)} className={smallButton}>
+                  Cancel
+                </button>
+              </div>
+            </form>
+          )}
           <Feedback error={error} message={message} />
         </div>
       )}

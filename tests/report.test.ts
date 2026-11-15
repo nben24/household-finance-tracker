@@ -58,7 +58,7 @@ describe("building the report", () => {
   });
 
   it("exports a spreadsheet with a header, a row per category and the totals", () => {
-    const csv = reportToCsv(buildReport(entries, periods, categories, "category", everyone), periods, false);
+    const csv = reportToCsv(buildReport(entries, periods, categories, "category", everyone), periods, null);
     expect(csv.split("\r\n")).toEqual([
       "Category,2026-08-01 to 2026-08-31,2026-09-01 to 2026-09-30,Total",
       "Housing,0.00,900.00,900.00",

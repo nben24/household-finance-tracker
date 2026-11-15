@@ -1,5 +1,5 @@
 import type { WeekStart } from "@/lib/dates";
-import { monthKey } from "@/lib/dates";
+import { addDays, addMonths, isMonthKey, monthKey, weekRange } from "@/lib/dates";
 import { firstParam, type SearchParams } from "@/lib/params";
 import { monthlyPeriods, weeklyPeriods, type ReportPeriod } from "./report";
 import { parseView, viewParam } from "./view-param";
@@ -13,6 +13,10 @@ export interface ReportOptions {
   period: "month" | "week";
   count: number;
   level: "category" | "subcategory";
+  /** the last month shown ('YYYY-MM'), when one was chosen; otherwise the current period */
+  end: string | null;
+  /** leave out the current, unfinished period */
+  completeOnly: boolean;
   periods: ReportPeriod[];
 }
 
@@ -27,12 +31,20 @@ export function parseReportOptions(
   const requested = Number(firstParam(params.count));
   const count = allowed.includes(requested) ? requested : allowed[1];
   const level = firstParam(params.detail) === "subcategory" ? "subcategory" : "category";
+  const completeOnly = firstParam(params.complete) === "1";
+  const requestedEnd = firstParam(params.end) ?? "";
+  const thisMonth = monthKey(today);
+  const end = period === "month" && isMonthKey(requestedEnd) && requestedEnd < thisMonth ? requestedEnd : null;
+  const lastMonth = end ?? (completeOnly ? addMonths(thisMonth, -1) : thisMonth);
+  const lastWeekDay = completeOnly ? addDays(weekRange(today, weekStartsOn).from, -1) : today;
   return {
     view: parseView(firstParam(params.view), members),
     period,
     count,
     level,
-    periods: period === "week" ? weeklyPeriods(today, count, weekStartsOn) : monthlyPeriods(monthKey(today), count),
+    end,
+    completeOnly,
+    periods: period === "week" ? weeklyPeriods(lastWeekDay, count, weekStartsOn) : monthlyPeriods(lastMonth, count),
   };
 }
 
@@ -43,5 +55,7 @@ export function reportQuery(options: Omit<ReportOptions, "periods">): Record<str
     period: options.period === "month" ? undefined : options.period,
     count: options.count,
     detail: options.level === "category" ? undefined : options.level,
+    end: options.end ?? undefined,
+    complete: options.completeOnly ? 1 : undefined,
   };
 }

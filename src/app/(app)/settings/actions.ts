@@ -9,9 +9,12 @@ import { defaultRuleRows, missingDefaultCategories } from "@/lib/categories/setu
 import { getDataSource, requireHousehold } from "@/lib/data";
 import { DUPLICATE_CATEGORY, MISSING_MIGRATION } from "@/lib/data/supabase";
 import type { ExpenseType, RuleMatchType } from "@/lib/db/types";
+import { isValidTimeZone } from "@/lib/household-time";
 import { isUuid } from "@/lib/params";
 
-export type SettingsResult = { ok: true; message?: string } | { ok: false; error: string };
+export type SettingsResult =
+  | { ok: true; message?: string }
+  | { ok: false; error: string; link?: { href: string; label: string } };
 
 const DEMO_MESSAGE = "This is the demo with made-up data, so nothing can be saved here.";
 const MATCH_TYPES: RuleMatchType[] = ["merchant", "description", "bank_category"];
@@ -270,5 +273,20 @@ export async function updateCategory(input: {
     return { ok: true };
   } catch (error) {
     return problem(error, "updateCategory");
+  }
+}
+
+/** The household's time zone: decides "today" and when private purchases are revealed, for both of you. */
+export async function setTimeZone(input: { timeZone: string }): Promise<SettingsResult> {
+  try {
+    const session = await editableHousehold();
+    if (!session) return { ok: false, error: DEMO_MESSAGE };
+    const zone = String(input.timeZone ?? "");
+    if (!isValidTimeZone(zone)) return { ok: false, error: "Choose a time zone from the list." };
+    await getDataSource().updateHouseholdSettings(session.household.id, { time_zone: zone });
+    revalidatePath("/", "layout");
+    return { ok: true, message: "Saved. Dates and reveal dates now follow this time zone." };
+  } catch (error) {
+    return problem(error, "setTimeZone");
   }
 }

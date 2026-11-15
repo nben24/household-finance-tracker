@@ -8,6 +8,7 @@ import { WEEK_STARTS_ON } from "@/lib/config";
 import { addDays, addMonths, daysBetween, monthKey, monthRange, weekRange } from "@/lib/dates";
 import {
   isTransferType,
+  type AccountCoverageRow,
   type AccountRow,
   type AccountBalanceRow,
   type AccountType,
@@ -33,6 +34,8 @@ export interface SeedOptions {
   months?: number;
   seed?: number;
   householdName?: string;
+  /** IANA time zone stored on the household (default America/New_York) */
+  timeZone?: string;
 }
 
 export interface SeedData {
@@ -45,6 +48,8 @@ export interface SeedData {
   balances: AccountBalanceRow[];
   incomeSources: IncomeSourceRow[];
   transactions: TransactionRow[];
+  /** each imported account's activity covers the whole generated period */
+  coverage: AccountCoverageRow[];
 }
 
 interface Entry {
@@ -103,6 +108,7 @@ export function generateSeedData(options: SeedOptions): SeedData {
     id: uuid(),
     name: options.householdName ?? "John & Jane Doe",
     review_starts_on: null,
+    time_zone: options.timeZone ?? "America/New_York",
     created_at: createdAt,
   };
 
@@ -126,6 +132,7 @@ export function generateSeedData(options: SeedOptions): SeedData {
     account_type: type,
     last_four: lastFour,
     is_active: true,
+    closed_on: null,
     created_at: createdAt,
   });
 
@@ -634,5 +641,20 @@ export function generateSeedData(options: SeedOptions): SeedData {
     paycheck(janeId, "Northside Health paycheck", 2780, addDays(PAYDAY_ANCHOR, 7)),
   ];
 
-  return { household, members, accounts, categories, rules, budgets, balances, incomeSources, transactions };
+  // Every account with imported activity covers the whole generated period.
+  const importedAccounts = new Set(transactions.filter((t) => !t.is_manual).map((t) => t.account_id));
+  const coverage: AccountCoverageRow[] = accounts
+    .filter((target) => importedAccounts.has(target.id))
+    .map((target) => ({
+      id: uuid(),
+      household_id: household.id,
+      account_id: target.id,
+      covered_from: `${firstMonth}-01`,
+      covered_through: endDate,
+      source: "import",
+      recorded_by: null,
+      created_at: createdAt,
+    }));
+
+  return { household, members, accounts, categories, rules, budgets, balances, incomeSources, transactions, coverage };
 }

@@ -93,6 +93,7 @@ async function main() {
     johnId,
     janeId,
     householdName,
+    timeZone: HOUSEHOLD_TIME_ZONE,
   });
 
   await insertInChunks(supabase, "households", [seed.household]);
@@ -108,6 +109,7 @@ async function main() {
     await insertInChunks(supabase, "transactions", transactions);
     await insertInChunks(supabase, "budget_lines", seed.budgets);
     await insertInChunks(supabase, "account_balances", seed.balances);
+    await insertInChunks(supabase, "account_coverage", seed.coverage);
     console.log(`Added ${seed.accounts.length} accounts and ${transactions.length} synthetic transactions.`);
   }
 

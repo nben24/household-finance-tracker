@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   accountsForView,
+  activeAccounts,
+  countsOn,
   balancesOn,
   holdsTransactions,
   isDebt,
@@ -69,7 +71,10 @@ describe("net worth on a date", () => {
     expect(ids({ kind: "person", personId: "m" })).toEqual(["401k"]);
     expect(ids({ kind: "shared" })).toEqual(["house", "mortgage"]);
     expect(ids({ kind: "everyone" })).toHaveLength(5);
-    expect(accountsForView([account("old", "checking", "n", false)], { kind: "everyone" })).toEqual([]);
+    // Retired accounts stay in the view (they count before they closed) but aren't listed as current.
+    const old = account("old", "checking", "n", false);
+    expect(accountsForView([old], { kind: "everyone" })).toEqual([old]);
+    expect(activeAccounts([old])).toEqual([]);
   });
 
   it("builds a month-by-month history from when balances begin", () => {
@@ -126,5 +131,56 @@ describe("the demo household", () => {
     const result = netWorthOn(seed.accounts, seed.balances, "2026-10-03");
     expect(result.netCents).toBeGreaterThan(0);
     expect(result.missing).toEqual([]);
+  });
+});
+
+describe("retiring an account", () => {
+  const checking = { ...account("checking", "checking"), closed_on: null as string | null };
+  const car = { ...account("car", "vehicle"), closed_on: null as string | null };
+  const loan = { ...account("loan", "loan"), closed_on: null as string | null };
+  const history = [
+    balance("checking", "2026-07-31", 5000),
+    balance("checking", "2026-08-31", 5200),
+    balance("checking", "2026-09-30", 5400),
+    balance("car", "2026-07-31", 18000),
+    balance("car", "2026-08-31", 17500),
+    balance("loan", "2026-07-31", 9000),
+    balance("loan", "2026-08-31", 8600),
+  ];
+  const before = monthlyHistory([checking, car, loan], history, "2026-10-15", 4);
+
+  it("doesn't change earlier months", () => {
+    // The car is sold and the loan paid off on September 10.
+    const retired = [checking, { ...car, is_active: false, closed_on: "2026-09-10" }, { ...loan, is_active: false, closed_on: "2026-09-10" }];
+    const after = monthlyHistory(retired, history, "2026-10-15", 4);
+    expect(after[0].netWorth).toEqual(before[0].netWorth); // July
+    expect(after[1].netWorth).toEqual(before[1].netWorth); // August
+    // From the closing date on they no longer count.
+    expect(after[2].netWorth.assetsCents).toBe(540000);
+    expect(after[2].netWorth.debtsCents).toBe(0);
+    expect(after[3].netWorth.netCents).toBe(540000);
+  });
+
+  it("counts on dates before closing, not on or after it", () => {
+    const sold = { ...car, is_active: false, closed_on: "2026-09-10" };
+    expect(countsOn(sold, "2026-09-09", "2026-08-31")).toBe(true);
+    expect(countsOn(sold, "2026-09-10", "2026-08-31")).toBe(false);
+    expect(netWorthOn([sold], history, "2026-09-09").assetsCents).toBe(1750000);
+    expect(netWorthOn([sold], history, "2026-09-10").assetsCents).toBe(0);
+  });
+
+  it("keeps an account retired before closing dates were recorded through its last balance", () => {
+    const legacy = { ...car, is_active: false, closed_on: null };
+    expect(netWorthOn([legacy], history, "2026-08-31").assetsCents).toBe(1750000);
+    expect(netWorthOn([legacy], history, "2026-09-01").assetsCents).toBe(0);
+  });
+
+  it("brings an account back when restored", () => {
+    expect(monthlyHistory([checking, car, loan], history, "2026-10-15", 4)).toEqual(before);
+  });
+
+  it("doesn't call a retired account's balance out of date", () => {
+    const sold = { ...car, is_active: false, closed_on: "2026-12-01" };
+    expect(netWorthOn([sold], history, "2026-11-30").stale).toEqual([]);
   });
 });

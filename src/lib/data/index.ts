@@ -5,7 +5,7 @@ import { isDemoMode, isSupabaseConfigured } from "@/lib/config";
 import type { HouseholdRow } from "@/lib/db/types";
 import { demoDataSource } from "./demo";
 import { supabaseDataSource } from "./supabase";
-import type { DataSource, SessionContext, TransactionFilter } from "./types";
+import type { DataSource, SessionContext } from "./types";
 
 // While a page renders, the same list is often asked for several times (the
 // dashboard's budget, recurring and spending sections all need categories).
@@ -20,6 +20,7 @@ const cachedSupabase: DataSource = {
   listRecurringOverrides: cache(supabaseDataSource.listRecurringOverrides),
   listBalances: cache(supabaseDataSource.listBalances),
   listIncomeSources: cache(supabaseDataSource.listIncomeSources),
+  listCoverage: cache(supabaseDataSource.listCoverage),
 };
 
 export function getDataSource(): DataSource {
@@ -48,15 +49,4 @@ export const earliestTransactionDate = cache(async (householdId: string): Promis
   return rows[0]?.transaction_date ?? null;
 });
 
-/** What belongs in Sunday Review: waiting transactions from the review start date on. */
-export function reviewQueueFilter(household: HouseholdRow, extra: TransactionFilter = {}): TransactionFilter {
-  return { ...extra, needsReview: true, from: household.review_starts_on ?? undefined };
-}
-
-/** What belongs on the Catch-up page: waiting transactions before the review start date. */
-export function catchUpFilter(household: HouseholdRow): TransactionFilter | null {
-  if (!household.review_starts_on) return null;
-  const dayBefore = new Date(`${household.review_starts_on}T00:00:00Z`);
-  dayBefore.setUTCDate(dayBefore.getUTCDate() - 1);
-  return { needsReview: true, to: dayBefore.toISOString().slice(0, 10) };
-}
+export { catchUpFilter, reviewQueueFilter } from "./filters";

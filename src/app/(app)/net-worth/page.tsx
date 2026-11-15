@@ -1,14 +1,14 @@
 import type { Metadata } from "next";
 import { AddAccountForm, BalanceControls } from "@/components/net-worth/net-worth-controls";
-import { BarList, Card, Metric, PageHeader } from "@/components/ui";
+import { BarList, Card, MetricTile, PageHeader } from "@/components/ui";
 import { ViewSwitcher } from "@/components/view-switcher";
-import { HOUSEHOLD_TIME_ZONE } from "@/lib/config";
 import { getDataSource, requireHousehold } from "@/lib/data";
-import { daysBetween, formatDayWithYear, formatShortMonth, todayInTimeZone } from "@/lib/dates";
+import { daysBetween, formatDayWithYear, formatShortMonth } from "@/lib/dates";
 import type { AccountRow, AccountType } from "@/lib/db/types";
 import {
   STALE_AFTER_DAYS,
   accountsForView,
+  activeAccounts,
   balancesOn,
   isDebt,
   monthlyHistory,
@@ -18,6 +18,7 @@ import { parseView, viewLabel } from "@/lib/finance/view-param";
 import { ACCOUNT_TYPE_LABELS } from "@/lib/labels";
 import { formatCents, formatCentsRounded, toCents } from "@/lib/money";
 import { firstParam } from "@/lib/params";
+import { householdToday } from "@/lib/household-time";
 
 export const metadata: Metadata = { title: "Net Worth" };
 
@@ -32,19 +33,22 @@ export default async function NetWorthPage({ searchParams }: PageProps<"/net-wor
   const session = await requireHousehold();
   const view = parseView(firstParam((await searchParams).view), session.members);
   const data = getDataSource();
-  const today = todayInTimeZone(HOUSEHOLD_TIME_ZONE);
+  const today = householdToday(session.household);
   const [allAccounts, balances] = await Promise.all([
     data.listAccounts(session.household.id),
     data.listBalances(session.household.id),
   ]);
 
-  const accounts = accountsForView(allAccounts, view);
+  // Every account in the view counts on the dates it was open (retired ones
+  // only before their closing date); only open ones are listed as current.
+  const inView = accountsForView(allAccounts, view);
+  const accounts = activeAccounts(inView);
   const latest = balancesOn(balances, today);
-  const current = netWorthOn(accounts, balances, today);
-  const history = monthlyHistory(accounts, balances, today, HISTORY_MONTHS);
+  const current = netWorthOn(inView, balances, today);
+  const history = monthlyHistory(inView, balances, today, HISTORY_MONTHS);
   const lastMonth = history.length >= 2 ? history[history.length - 2] : null;
   const memberNames = new Map(session.members.map((member) => [member.id, member.name]));
-  const retired = allAccounts.filter((account) => !account.is_active && accountsForView([{ ...account, is_active: true }], view).length > 0);
+  const retired = inView.filter((account) => !account.is_active);
 
   const historyFor = (accountId: string) =>
     balances
@@ -110,10 +114,10 @@ export default async function NetWorthPage({ searchParams }: PageProps<"/net-wor
       <ViewSwitcher path="/net-worth" current={view} members={session.members} />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Metric label="What you own" value={formatCentsRounded(current.assetsCents)} />
-        <Metric label="What you owe" value={formatCentsRounded(current.debtsCents)} />
-        <Metric label="Net worth" value={formatCentsRounded(current.netCents)} />
-        <Metric
+        <MetricTile label="What you own" value={formatCentsRounded(current.assetsCents)} />
+        <MetricTile label="What you owe" value={formatCentsRounded(current.debtsCents)} />
+        <MetricTile label="Net worth" value={formatCentsRounded(current.netCents)} />
+        <MetricTile
           label="Since last month"
           value={lastMonth ? signed(current.netCents - lastMonth.netWorth.netCents) : "—"}
           hint={lastMonth ? `vs end of ${formatShortMonth(lastMonth.month)}` : "needs a month of history"}
@@ -145,7 +149,8 @@ export default async function NetWorthPage({ searchParams }: PageProps<"/net-wor
             }))}
           />
           <p className="mt-3 text-xs text-muted">
-            Each month uses the latest balance on or before its last day. Accounts count from their first balance onward.
+            Each month uses the latest balance on or before its last day. Accounts count from their first balance onward,
+            and retired accounts only before the date they closed, so retiring one never changes earlier months.
           </p>
         </Card>
       )}
@@ -171,8 +176,15 @@ export default async function NetWorthPage({ searchParams }: PageProps<"/net-wor
           <ul className="mt-2 divide-y divide-line">
             {retired.map((account) => (
               <li key={account.id} className="flex items-center justify-between gap-3 py-2 text-sm">
-                <span>
-                  {account.institution} {account.account_name}
+                <span className="min-w-0">
+                  <span className="break-anywhere">
+                    {account.institution} {account.account_name}
+                  </span>
+                  <span className="block text-xs text-muted">
+                    {account.closed_on
+                      ? `Closed ${formatDayWithYear(account.closed_on)} · counts in net worth before then`
+                      : "Closing date not recorded · counts through its last balance"}
+                  </span>
                 </span>
                 <BalanceControls accountId={account.id} today={today} history={[]} active={false} />
               </li>

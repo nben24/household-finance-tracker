@@ -126,14 +126,25 @@ function median(values: number[]): number {
  * day, the middle value of the earlier months' running totals (up to six full
  * months the data covers; a shorter month carries its last day forward).
  */
-export function spendingPace(entries: Entry[], month: string, today: string, dataStartsOn: string | null): Pace {
+/**
+ * @param dataStartsOn the household's earliest transaction date, or a check of
+ *   whether a whole month's activity was imported for every account
+ */
+export function spendingPace(
+  entries: Entry[],
+  month: string,
+  today: string,
+  dataStartsOn: string | null | ((month: string) => boolean),
+): Pace {
+  const usable = (past: string) =>
+    typeof dataStartsOn === "function" ? dataStartsOn(past) : dataStartsOn !== null && dataStartsOn <= `${past}-01`;
   const { from, to } = monthRange(month);
   const daysInMonth = Number(to.slice(8));
   const throughDay = today < from ? 0 : today > to ? daysInMonth : Number(today.slice(8));
   const soFar = cumulativeByDay(entries, month, daysInMonth).slice(0, throughDay);
   const history = [1, 2, 3, 4, 5, 6]
     .map((back) => addMonths(month, -back))
-    .filter((past) => dataStartsOn !== null && dataStartsOn <= `${past}-01`)
+    .filter(usable)
     .map((past) => {
       const days = Number(monthRange(past).to.slice(8));
       const line = cumulativeByDay(entries, past, days);

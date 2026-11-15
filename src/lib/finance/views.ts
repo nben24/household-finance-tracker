@@ -13,6 +13,7 @@ import { addMonths, monthKey, monthRange } from "@/lib/dates";
 import type { CategoryRow, TransactionRow } from "@/lib/db/types";
 import { toCents } from "@/lib/money";
 import { SAVINGS_ACCOUNT_TRANSFER } from "@/lib/import/classify";
+import { allocationsOf } from "./allocations";
 import { isPendingSharedFunding } from "./shared-account";
 import { countsAsSpending } from "./summary";
 
@@ -31,7 +32,7 @@ type Row = Pick<
   | "category_id"
   | "subcategory_id"
 > &
-  Partial<Pick<TransactionRow, "original_description" | "bank_category">>;
+  Partial<Pick<TransactionRow, "original_description" | "bank_category" | "splits">>;
 
 /**
  * A transfer that moves money into savings (positive) or back out of it
@@ -70,9 +71,28 @@ export interface Entry {
   pending?: boolean;
 }
 
-interface Options {
+export interface ViewOptions {
   memberCount: number;
   mode: SharedSpendingMode;
+  /**
+   * Members in a fixed order. In "split" mode each person's share of shared
+   * spending is a whole number of cents; any leftover cent goes to the
+   * earliest people in this order, so the shares always add up exactly.
+   * Without it, shares are fractional (and rounded only in totals).
+   */
+  memberIds?: string[];
+}
+
+type Options = ViewOptions;
+
+/**
+ * One person's whole-cent share of an amount split between `count` people.
+ * The shares of indexes 0…count-1 always add up to exactly `cents`.
+ */
+export function shareOf(cents: number, count: number, index: number): number {
+  const base = Math.trunc(cents / count);
+  const remainder = cents - base * count;
+  return base + (index < Math.abs(remainder) ? Math.sign(remainder) : 0);
 }
 
 /** Money paid into a joint account by a member (recorded on the deposit row). */
@@ -92,6 +112,18 @@ export function viewEntries(rows: Row[], view: View, options: Options): Entry[] 
   for (const row of rows) {
     const cents = toCents(row.amount);
     const spending = countsAsSpending(row);
+    // Spending, as its parts when it's a split purchase (each counted once).
+    const pushSpending = (share?: (partCents: number) => number) => {
+      for (const part of allocationsOf(row)) {
+        entries.push({
+          date: row.transaction_date,
+          categoryId: part.categoryId,
+          subcategoryId: part.subcategoryId,
+          cents: share ? share(-part.cents) : -part.cents,
+          kind: "spending",
+        });
+      }
+    };
     const shared = row.person_id === null;
     const inView =
       view.kind === "everyone" || (view.kind === "shared" ? shared : row.person_id === view.personId);
@@ -109,13 +141,13 @@ export function viewEntries(rows: Row[], view: View, options: Options): Entry[] 
     }
 
     if (view.kind === "everyone") {
-      if (spending) entries.push({ ...base(row), cents: -cents, kind: "spending" });
+      if (spending) pushSpending();
       if (row.transaction_type === "income") entries.push({ ...base(row), cents, kind: "income" });
       continue;
     }
 
     if (view.kind === "shared") {
-      if (spending && shared) entries.push({ ...base(row), cents: -cents, kind: "spending" });
+      if (spending && shared) pushSpending();
       if (row.transaction_type === "income" && shared) entries.push({ ...base(row), cents, kind: "income" });
       if (isSharedDeposit(row)) {
         entries.push({ ...base(row), cents, kind: "contribution", personId: row.counterparty_id! });
@@ -127,7 +159,7 @@ export function viewEntries(rows: Row[], view: View, options: Options): Entry[] 
     }
 
     const me = view.personId;
-    if (spending && row.person_id === me) entries.push({ ...base(row), cents: -cents, kind: "spending" });
+    if (spending && row.person_id === me) pushSpending();
     if (row.transaction_type === "income" && row.person_id === me) {
       entries.push({ ...base(row), cents, kind: "income" });
     }
@@ -143,7 +175,8 @@ export function viewEntries(rows: Row[], view: View, options: Options): Entry[] 
       entries.push({ ...base(row), cents: -cents, kind: "contribution", personId: me, pending: true });
     }
     if (options.mode === "split" && spending && shared && options.memberCount > 0) {
-      entries.push({ ...base(row), cents: -cents / options.memberCount, kind: "spending" });
+      const index = options.memberIds?.indexOf(me) ?? -1;
+      pushSpending((partCents) => (index >= 0 ? shareOf(partCents, options.memberCount, index) : partCents / options.memberCount));
     }
   }
   return entries;

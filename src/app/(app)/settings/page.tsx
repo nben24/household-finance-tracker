@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { AppearancePicker } from "@/components/settings/appearance-picker";
+import { TimeZonePicker } from "@/components/settings/time-zone-picker";
+import { secondaryButton } from "@/components/styles";
+import { COMMON_TIME_ZONES, householdTimeZone } from "@/lib/household-time";
 import { CategoryEditor } from "@/components/settings/category-editor";
 import { Card, PageHeader, TextLink } from "@/components/ui";
 import { getDataSource, requireHousehold } from "@/lib/data";
@@ -22,6 +25,14 @@ export default async function SettingsPage() {
   return (
     <>
       <PageHeader title="Settings" subtitle={session.household.name} />
+
+      <Card className="mb-4" title="Household calendar">
+        <TimeZonePicker
+          current={householdTimeZone(session.household)}
+          options={[...new Set([householdTimeZone(session.household), ...COMMON_TIME_ZONES])]}
+          readOnly={session.isDemo}
+        />
+      </Card>
 
       <Card className="mb-4" title="Appearance">
         <AppearancePicker
@@ -46,6 +57,7 @@ export default async function SettingsPage() {
         </Card>
 
         <Card title="Accounts">
+          <p className="mb-2 text-[13px] text-muted">Joint accounts&apos; purchases appear under Shared.</p>
           {accounts.length === 0 ? (
             <p className="text-sm text-muted">No accounts yet.</p>
           ) : (
@@ -61,8 +73,9 @@ export default async function SettingsPage() {
                       {account.last_four && ` ·· ${account.last_four}`}
                     </span>
                   </span>
-                  <span className="text-muted">
+                  <span className="text-right text-muted">
                     {account.owner_user_id ? (memberNames.get(account.owner_user_id) ?? "") : "Joint"}
+                    {!account.is_active && <span className="block text-xs">retired</span>}
                   </span>
                 </li>
               ))}
@@ -78,6 +91,23 @@ export default async function SettingsPage() {
       >
         <CategoryEditor categories={categories} readOnly={session.isDemo} />
       </Card>
+      <section id="backup" className="mt-4 scroll-mt-6">
+        <Card title="Your records">
+          <p className="max-w-prose text-sm text-muted">
+            Download every transaction to the cent, or a complete backup (transactions with their split parts, accounts,
+            balances, categories, rules, budgets and settings) in a versioned format. Downloads include only what you can
+            see, so the other person&apos;s unrevealed private purchases are left out.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <a href="/reports/ledger" className={secondaryButton}>
+              All transactions (CSV)
+            </a>
+            <a href="/settings/backup" className={secondaryButton}>
+              Full backup (JSON)
+            </a>
+          </div>
+        </Card>
+      </section>
     </>
   );
 }

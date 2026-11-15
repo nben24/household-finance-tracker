@@ -1,6 +1,6 @@
 import "server-only";
-import { SHARED_SPENDING_MODE } from "@/lib/config";
-import { earliestTransactionDate, getDataSource, type HouseholdContext } from "@/lib/data";
+import { getDataSource, type HouseholdContext } from "@/lib/data";
+import { loadCoverage } from "./load-coverage";
 import { addMonths, monthKey, monthRange } from "@/lib/dates";
 import type { BudgetLineRow, CategoryRow } from "@/lib/db/types";
 import {
@@ -13,6 +13,7 @@ import {
 } from "./budgets";
 import { viewParam } from "./view-param";
 import { averageByCategory, entriesByCategory, viewEntries, type Entry, type View } from "./views";
+import { viewOptions } from "@/lib/finance/view-options";
 
 const AVERAGE_MONTHS = 3;
 
@@ -26,15 +27,17 @@ export interface BudgetPage {
   /** average monthly spending over recent full months, by category id and subcategory id */
   averages: Record<string, number>;
   averageMonths: number;
+  /** recent months left out of the averages because some account's activity is missing */
+  partialMonths: string[];
 }
 
 export async function loadBudget(session: HouseholdContext, view: View, month: string): Promise<BudgetPage> {
   const data = getDataSource();
   const householdId = session.household.id;
-  const [allLines, categories, dataStartsOn] = await Promise.all([
+  const [allLines, categories, coverage] = await Promise.all([
     data.listBudgetLines(householdId),
     data.listCategories(householdId),
-    earliestTransactionDate(householdId),
+    loadCoverage(householdId),
   ]);
   const shown = linesForView(allLines, view);
 
@@ -44,7 +47,7 @@ export async function loadBudget(session: HouseholdContext, view: View, month: s
   const from = [averageStart, ...fundStarts].sort()[0];
   const transactions = await data.listTransactions(householdId, { from, to: monthRange(month).to });
 
-  const options = { memberCount: session.members.length, mode: SHARED_SPENDING_MODE };
+  const options = viewOptions(session);
   const cache = new Map<string, Entry[]>();
   const entriesForView = (target: View) => {
     const key = viewParam(target);
@@ -57,9 +60,9 @@ export async function loadBudget(session: HouseholdContext, view: View, month: s
   );
   const viewMonthEntries = entriesForView(view).filter((entry) => monthKey(entry.date) === month);
 
-  const averageMonths = [1, 2, 3]
-    .map((back) => addMonths(month, -back))
-    .filter((previous) => dataStartsOn !== null && dataStartsOn <= `${previous}-01`);
+  // Only months where every account's activity was imported count toward averages.
+  const recentMonths = [1, 2, 3].map((back) => addMonths(month, -back));
+  const averageMonths = recentMonths.filter(coverage.isMonthComplete);
   const averages: Record<string, number> = {};
   const viewEntriesAll = entriesForView(view);
   for (const [id, cents] of averageByCategory(viewEntriesAll, categories, averageMonths.map(monthRange))) {
@@ -80,6 +83,7 @@ export async function loadBudget(session: HouseholdContext, view: View, month: s
     categories,
     averages,
     averageMonths: averageMonths.length,
+    partialMonths: coverage.partialAmong(recentMonths),
   };
 }
 

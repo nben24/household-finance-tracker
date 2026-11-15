@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
-import { reviewTransaction } from "@/app/(app)/review/actions";
+import { useEffect, useId, useRef, useState, useTransition } from "react";
+import { reviewTransaction, undoReview } from "@/app/(app)/review/actions";
+import { chipClass, inputClass, primaryButton } from "@/components/styles";
 import {
   REVIEW_KINDS,
   REVIEW_KIND_LABELS,
@@ -42,11 +43,6 @@ export interface ReviewItem {
   sameMerchantCount?: number;
 }
 
-const chipClass = (selected: boolean) =>
-  `rounded-full border px-3 py-1 text-xs font-medium ${
-    selected ? "border-accent bg-accent-soft text-accent" : "border-line text-muted hover:text-text"
-  }`;
-
 export function ReviewCard({
   item,
   groups,
@@ -59,7 +55,7 @@ export function ReviewCard({
   /** frequently used subcategory ids, offered as one-tap choices */
   quickPicks: string[];
   mode: "queue" | "edit";
-  onSaved?: (alsoSorted: number) => void;
+  onSaved?: (result: { alsoSorted: number; summary: string; operationId?: string }) => void;
 }) {
   const router = useRouter();
   const [kind, setKind] = useState<ReviewKind>(item.kind);
@@ -69,6 +65,8 @@ export function ReviewCard({
   const [applyToMerchant, setApplyToMerchant] = useState(false);
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
+  const errorId = useId();
+  const headingId = useId();
 
   const labels = new Map(
     groups.flatMap((group) => group.children.map((child) => [child.id, `${group.name} › ${child.name}`] as const)),
@@ -94,16 +92,16 @@ export function ReviewCard({
         setError(result.error);
         return;
       }
-      onSaved?.(result.alsoSorted);
+      onSaved?.({ alsoSorted: result.alsoSorted, summary: result.summary, operationId: result.operationId });
       router.refresh();
     });
   }
 
   return (
-    <article className="rounded-xl border border-line bg-surface p-4 sm:p-5">
+    <article className="rounded-xl border border-line bg-surface p-4 sm:p-5" aria-labelledby={headingId} data-review-id={item.id}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h3 className="truncate font-semibold">
+          <h3 id={headingId} tabIndex={-1} className="break-anywhere font-semibold">
             {mode === "queue" && item.isPrivate ? (
               <Link href={`/transactions/${item.id}`} className="hover:underline">
                 {item.merchant}
@@ -126,10 +124,10 @@ export function ReviewCard({
       )}
 
       <fieldset className="mt-4">
-        <legend className="text-xs font-medium text-muted">What is this?</legend>
+        <legend className="text-sm font-medium text-muted">What is this?</legend>
         <div className="mt-1.5 flex flex-wrap gap-1.5">
           {kinds.map((option) => (
-            <button key={option} type="button" onClick={() => setKind(option)} className={chipClass(kind === option)}>
+            <button key={option} type="button" aria-pressed={kind === option} onClick={() => setKind(option)} className={chipClass(kind === option)}>
               {REVIEW_KIND_LABELS[option]}
             </button>
           ))}
@@ -144,11 +142,19 @@ export function ReviewCard({
 
       {allowsCategory(kind) && (
         <div className="mt-4">
-          <p className="text-xs font-medium text-muted">Category{kind === "payback" && " (optional)"}</p>
+          <p className="text-sm font-medium text-muted" id={`${headingId}-category`}>
+            Category{kind === "payback" && " (optional)"}
+          </p>
           {chips.length > 0 && (
-            <div className="mt-1.5 flex flex-wrap gap-1.5">
+            <div className="mt-1.5 flex flex-wrap gap-1.5" role="group" aria-labelledby={`${headingId}-category`}>
               {chips.map((id) => (
-                <button key={id} type="button" onClick={() => setSubcategoryId(id)} className={chipClass(subcategoryId === id)}>
+                <button
+                  key={id}
+                  type="button"
+                  aria-pressed={subcategoryId === id}
+                  onClick={() => setSubcategoryId(id)}
+                  className={chipClass(subcategoryId === id)}
+                >
                   {labels.get(id)}
                 </button>
               ))}
@@ -158,7 +164,9 @@ export function ReviewCard({
             value={subcategoryId}
             onChange={(event) => setSubcategoryId(event.target.value)}
             aria-label="Category"
-            className="mt-2 w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-accent"
+            aria-invalid={error && needsCategory(kind) && !subcategoryId ? true : undefined}
+            aria-describedby={error ? errorId : undefined}
+            className={`mt-2 w-full ${inputClass}`}
           >
             <option value="">{kind === "payback" ? "No category" : "Choose a category…"}</option>
             {groups.map((group) => (
@@ -200,7 +208,7 @@ export function ReviewCard({
             onChange={(event) => setNotes(event.target.value)}
             maxLength={500}
             rows={2}
-            className="mt-1 w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-text outline-none focus:border-accent"
+            className={`mt-1 w-full ${inputClass}`}
           />
         </label>
       )}
@@ -222,17 +230,12 @@ export function ReviewCard({
       )}
 
       {error && (
-        <p role="alert" className="mt-3 rounded-lg bg-notice-soft px-3 py-2 text-sm text-notice">
+        <p id={errorId} role="alert" className="mt-3 rounded-lg bg-notice-soft px-3 py-2 text-sm text-notice">
           {error}
         </p>
       )}
       <div className="mt-4 flex justify-end">
-        <button
-          type="button"
-          onClick={save}
-          disabled={pending || !canSave}
-          className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-surface disabled:opacity-50"
-        >
+        <button type="button" onClick={save} disabled={pending || !canSave} className={primaryButton}>
           {pending ? "Saving…" : mode === "queue" && untouched && canSave ? "Looks right" : "Save"}
         </button>
       </div>
@@ -244,33 +247,81 @@ export function ReviewQueue({
   items,
   groups,
   quickPicks,
+  total,
 }: {
   items: ReviewItem[];
   groups: CategoryGroup[];
   quickPicks: string[];
+  /** everything waiting in the queue (items may be only the first page) */
+  total: number;
 }) {
-  const [message, setMessage] = useState("");
+  const router = useRouter();
+  const [status, setStatus] = useState<{ text: string; operationId?: string; error?: boolean } | null>(null);
+  const [undoing, startUndo] = useTransition();
+  const statusRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const focusAfterSave = useRef<string | null>(null);
+
+  // After a save, the saved card leaves the list. Move keyboard focus to the
+  // next decision's heading (or the status, when none are left) without
+  // scrolling the page more than needed.
+  useEffect(() => {
+    const target = focusAfterSave.current;
+    if (target === null) return;
+    focusAfterSave.current = null;
+    const heading = listRef.current?.querySelector<HTMLElement>(`[data-review-id="${target}"] h3`);
+    const element = heading ?? statusRef.current;
+    element?.focus({ preventScroll: true });
+    element?.scrollIntoView({ block: "nearest" });
+  }, [items]);
+
+  const left = Math.max(0, total - 1);
   return (
-    <div className="flex flex-col gap-3">
-      {message && (
-        <p role="status" className="rounded-lg bg-accent-soft px-3 py-2 text-sm text-accent">
-          {message}
-        </p>
-      )}
-      {items.map((item) => (
+    <div className="flex flex-col gap-3" ref={listRef}>
+      <div
+        ref={statusRef}
+        tabIndex={-1}
+        role="status"
+        aria-live="polite"
+        className={status ? `flex flex-wrap items-center justify-between gap-2 rounded-lg px-3 py-2 text-sm ${status.error ? "bg-notice-soft text-notice" : "bg-accent-soft text-accent"}` : "sr-only"}
+      >
+        {status && (
+          <>
+            <span>{status.text}</span>
+            {status.operationId && (
+              <button
+                type="button"
+                disabled={undoing}
+                onClick={() =>
+                  startUndo(async () => {
+                    const result = await undoReview({ operationId: status.operationId! });
+                    setStatus(result.ok ? { text: result.message } : { text: result.error, error: true });
+                    if (result.ok) router.refresh();
+                  })
+                }
+                className="min-h-9 rounded-lg border border-current px-3 text-sm font-semibold"
+              >
+                {undoing ? "Undoing…" : "Undo"}
+              </button>
+            )}
+          </>
+        )}
+      </div>
+      {items.map((item, index) => (
         <ReviewCard
           key={item.id}
           item={item}
           groups={groups}
           quickPicks={quickPicks}
           mode="queue"
-          onSaved={(alsoSorted) =>
-            setMessage(
-              alsoSorted > 0
-                ? `Saved. ${alsoSorted} more from the same place ${alsoSorted === 1 ? "was" : "were"} sorted too.`
-                : "",
-            )
-          }
+          onSaved={(result) => {
+            focusAfterSave.current = items[index + 1]?.id ?? items[index - 1]?.id ?? null;
+            const remaining = Math.max(0, left - result.alsoSorted);
+            setStatus({
+              text: `${result.summary} ${remaining === 0 ? "Nothing left to review." : `${remaining} left to review.`}`,
+              operationId: result.operationId,
+            });
+          }}
         />
       ))}
     </div>

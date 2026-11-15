@@ -170,3 +170,25 @@ body {
 .tabular {
   font-variant-numeric: tabular-nums;
 }
+
+/* Keyboard focus is always visible, in every theme. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Long names and amounts wrap instead of pushing the layout sideways. */
+.break-anywhere {
+  overflow-wrap: anywhere;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

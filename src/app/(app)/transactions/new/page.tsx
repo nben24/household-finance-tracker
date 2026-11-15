@@ -2,11 +2,10 @@ import type { Metadata } from "next";
 import { AddTransactionForm } from "@/components/manual/add-transaction-form";
 import { Card, PageHeader, TextLink } from "@/components/ui";
 import { categoryGroups } from "@/lib/categories/view";
-import { HOUSEHOLD_TIME_ZONE } from "@/lib/config";
 import { getDataSource, requireHousehold } from "@/lib/data";
-import { todayInTimeZone } from "@/lib/dates";
 import { holdsTransactions } from "@/lib/finance/net-worth";
 import { isCashAccount } from "@/lib/import/manual";
+import { householdToday } from "@/lib/household-time";
 
 export const metadata: Metadata = { title: "Add a transaction" };
 
@@ -44,7 +43,7 @@ export default async function NewTransactionPage() {
             accounts={options}
             defaultAccountId={defaultAccount?.id ?? ""}
             groups={categoryGroups(categories)}
-            today={todayInTimeZone(HOUSEHOLD_TIME_ZONE)}
+            today={householdToday(session.household)}
             hasCashAccount={accounts.some((account) => isCashAccount(account) && account.owner_user_id === session.user.id)}
           />
         )}

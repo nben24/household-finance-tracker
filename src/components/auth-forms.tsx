@@ -10,7 +10,7 @@ import {
 } from "@/app/auth/actions";
 
 const inputClass =
-  "w-full rounded-lg border border-line bg-surface px-3 py-2.5 text-base outline-none focus:border-accent";
+  "w-full rounded-lg border border-line bg-surface px-3 py-2.5 text-base focus:border-accent";
 const buttonClass =
   "w-full rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-surface disabled:opacity-60";
 const linkClass = "text-sm font-medium text-accent hover:underline";

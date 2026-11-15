@@ -66,6 +66,11 @@ export interface ForecastInput {
   today: string;
   /** the household's earliest transaction: only months fully covered count as history */
   dataStartsOn: string | null;
+  /**
+   * Whether every account's activity was imported for a whole month. When
+   * given, it decides which months count as history (instead of dataStartsOn).
+   */
+  isMonthComplete?: (month: string) => boolean;
   view: View;
   /** the view's entries, from at least six months before `month` through today */
   entries: Entry[];
@@ -116,6 +121,65 @@ export interface Forecast {
   byCategory: CategoryForecast[];
 }
 
+export interface CashFlowLine {
+  key: string;
+  label: string;
+  /** what this line does to the result: positive adds, negative takes away */
+  effectCents: number;
+  note?: string;
+}
+
+/**
+ * The month's cash flow as signed lines whose effects add up exactly to the
+ * projected result (forecast.leftOver.expectedCents). Each line's sign is its
+ * real effect: refunds can make "spent so far" add money, and money taken back
+ * out of savings adds rather than subtracts.
+ */
+export function cashFlowLines(forecast: Forecast, view: View, isThisMonth: boolean): CashFlowLine[] {
+  const contributionTotal = forecast.contributions.soFarCents + forecast.contributions.toComeCents;
+  const lines: CashFlowLine[] = [{ key: "income", label: "Expected income", effectCents: forecast.incomeCents }];
+  if (view.kind === "shared") {
+    lines.push({ key: "paid-in", label: "Paid in by both of you", effectCents: contributionTotal });
+  }
+  if (isThisMonth || forecast.spentSoFarCents !== 0) {
+    lines.push({
+      key: "spent",
+      label: forecast.spentSoFarCents < 0 ? "Refunds so far (more than spent)" : "Spent so far",
+      effectCents: -forecast.spentSoFarCents,
+    });
+  }
+  lines.push(
+    {
+      key: "bills",
+      label: "Recurring bills still to come",
+      effectCents: -forecast.recurringToCome.reduce((total, item) => total + item.cents, 0),
+    },
+    { key: "everyday", label: "Expected everyday spending", effectCents: -forecast.everyday.expectedCents },
+    { key: "irregular", label: "Expected irregular spending", effectCents: -forecast.irregularCents },
+  );
+  if (view.kind === "person") {
+    lines.push({ key: "paid-into-shared", label: "Paid into the shared account", effectCents: -contributionTotal });
+  }
+  if (forecast.setAsideSoFarCents !== 0) {
+    lines.push({
+      key: "set-aside",
+      label:
+        forecast.setAsideSoFarCents < 0
+          ? "Taken out of savings & investments so far"
+          : "Saved & invested so far",
+      effectCents: -forecast.setAsideSoFarCents,
+    });
+  }
+  return lines;
+}
+
+/** "Projected left over" or "Projected shortfall", with the amount to show (never negative). */
+export function resultLabel(cents: number): { label: string; shortfall: boolean; amountCents: number } {
+  return cents < 0
+    ? { label: "Projected shortfall", shortfall: true, amountCents: -cents }
+    : { label: "Projected left over", shortfall: false, amountCents: cents };
+}
+
 function median(values: number[]): number {
   if (values.length === 0) return 0;
   const sorted = [...values].sort((a, b) => a - b);
@@ -148,7 +212,13 @@ export function forecastMonth(input: ForecastInput): Forecast {
   // History: up to six full months before this one that the data fully covers.
   const history = [6, 5, 4, 3, 2, 1]
     .map((back) => addMonths(month, -back))
-    .filter((past) => past < today.slice(0, 7) && input.dataStartsOn !== null && input.dataStartsOn <= `${past}-01`)
+    .filter(
+      (past) =>
+        past < today.slice(0, 7) &&
+        (input.isMonthComplete
+          ? input.isMonthComplete(past)
+          : input.dataStartsOn !== null && input.dataStartsOn <= `${past}-01`),
+    )
     .map((past) => {
       const { from, to } = monthRange(past);
       const spending = totals(entries, from, to, "spending");

@@ -16,7 +16,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen md:flex">
-      <aside className="hidden w-60 shrink-0 flex-col border-r border-line bg-surface p-4 md:flex">
+      <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col overflow-y-auto border-r border-line bg-surface p-4 md:flex">
         <div className="px-3 pb-5 pt-2">
           <p className="text-xs font-semibold uppercase tracking-widest text-accent">Household Finance</p>
           <p className="mt-1 truncate text-sm font-medium">{session.household.name}</p>

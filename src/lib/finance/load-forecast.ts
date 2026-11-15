@@ -1,12 +1,14 @@
 import "server-only";
-import { HOUSEHOLD_TIME_ZONE, SHARED_SPENDING_MODE } from "@/lib/config";
 import { earliestTransactionDate, getDataSource, type HouseholdContext } from "@/lib/data";
-import { addMonths, monthRange, todayInTimeZone } from "@/lib/dates";
+import { loadCoverage, monthsBefore } from "./load-coverage";
+import { addMonths, monthRange } from "@/lib/dates";
 import type { IncomeSourceRow } from "@/lib/db/types";
 import { forecastMonth, scheduleDates, type ExpectedItem } from "./forecast";
 import { activeItems, loadRecurring } from "./load-recurring";
 import { upcoming } from "./recurring";
 import { viewEntries, type View } from "./views";
+import { householdToday } from "@/lib/household-time";
+import { viewOptions } from "@/lib/finance/view-options";
 
 /** Expected income in a view: what people entered, or detected paychecks for anyone who hasn't. */
 function expectedIncome(
@@ -37,14 +39,15 @@ function expectedIncome(
 export async function loadForecast(session: HouseholdContext, view: View, month: string) {
   const data = getDataSource();
   const householdId = session.household.id;
-  const today = todayInTimeZone(HOUSEHOLD_TIME_ZONE);
+  const today = householdToday(session.household);
   const range = monthRange(month);
-  const [transactions, categories, sources, dataStartsOn, recurring] = await Promise.all([
+  const [transactions, categories, sources, dataStartsOn, recurring, coverage] = await Promise.all([
     data.listTransactions(householdId, { from: `${addMonths(month, -7)}-01`, to: today }),
     data.listCategories(householdId),
     data.listIncomeSources(householdId),
     earliestTransactionDate(householdId),
     loadRecurring(session, view),
+    loadCoverage(householdId),
   ]);
 
   const active = activeItems(recurring.items);
@@ -64,8 +67,9 @@ export async function loadForecast(session: HouseholdContext, view: View, month:
     month,
     today,
     dataStartsOn,
+    isMonthComplete: coverage.isMonthComplete,
     view,
-    entries: viewEntries(transactions.rows, view, { memberCount: session.members.length, mode: SHARED_SPENDING_MODE }),
+    entries: viewEntries(transactions.rows, view, viewOptions(session)),
     irregularSubcategories: new Set(
       categories.filter((c) => c.parent_id !== null && c.default_expense_type === "irregular").map((c) => c.id),
     ),
@@ -74,5 +78,12 @@ export async function loadForecast(session: HouseholdContext, view: View, month:
     income: expectedIncome(sources, detectedIncome, view, range.from, range.to),
   });
 
-  return { forecast, categories, sources, today };
+  const lookback = monthsBefore(month, 6).filter((past) => past < today.slice(0, 7));
+  return {
+    forecast,
+    categories,
+    sources,
+    today,
+    coverage: { summary: coverage.summary, partialMonths: coverage.partialAmong(lookback) },
+  };
 }

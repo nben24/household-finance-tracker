@@ -20,7 +20,7 @@ function demoData(): SeedData {
   if (cached?.date !== today) {
     cached = {
       date: today,
-      data: generateSeedData({ endDate: today, johnId: JOHN_ID, janeId: JANE_ID, months: 12 }),
+      data: generateSeedData({ endDate: today, johnId: JOHN_ID, janeId: JANE_ID, months: 12, timeZone: HOUSEHOLD_TIME_ZONE }),
     };
   }
   return cached.data;
@@ -49,6 +49,7 @@ export function matchesFilter(transaction: TransactionRow, filter: TransactionFi
   }
   if (filter.needsReview && transaction.review_status !== "needs_review") return false;
   if (filter.awaitingPost && !transaction.awaiting_post) return false;
+  if (filter.importBatchId && transaction.import_batch_id !== filter.importBatchId) return false;
   if (filter.search) {
     const needle = filter.search.toLowerCase();
     const haystack = `${transaction.normalized_merchant} ${transaction.original_description}`;
@@ -116,6 +117,13 @@ export const demoDataSource: DataSource = {
   },
 
   updateTransactions: readOnly,
+  saveSplits: readOnly,
+  recordReviewOperation: readOnly,
+  undoReviewOperation: readOnly,
+
+  async transactionsByIds(_householdId, ids) {
+    return demoData().transactions.filter((t) => ids.includes(t.id));
+  },
   saveRule: readOnly,
   addMissingRules: readOnly,
   updateRule: readOnly,
@@ -128,8 +136,8 @@ export const demoDataSource: DataSource = {
   },
 
   createBudgetLine: readOnly,
-  updateBudgetLine: readOnly,
-  deleteBudgetLine: readOnly,
+  changeBudgetLine: readOnly,
+  endBudgetLine: readOnly,
 
   updateHouseholdSettings: readOnly,
 
@@ -157,4 +165,25 @@ export const demoDataSource: DataSource = {
 
   saveIncomeSource: readOnly,
   deleteIncomeSource: readOnly,
+
+  async listCoverage() {
+    return demoData().coverage;
+  },
+
+  recordCoverage: readOnly,
+  saveMonthClosing: readOnly,
+
+  async getMonthClosing() {
+    return null;
+  },
+  startImportBatch: readOnly,
+  updateImportBatch: readOnly,
+
+  async getImportBatch() {
+    return null;
+  },
+
+  async unfinishedImport() {
+    return null;
+  },
 };

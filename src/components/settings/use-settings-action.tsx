@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import type { SettingsResult } from "@/app/(app)/settings/actions";
@@ -10,14 +11,17 @@ export function useSettingsAction() {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [link, setLink] = useState<{ href: string; label: string } | undefined>();
 
   function run(action: () => Promise<SettingsResult>, onSuccess?: () => void) {
     setError("");
     setMessage("");
+    setLink(undefined);
     startTransition(async () => {
       const result = await action();
       if (!result.ok) {
         setError(result.error);
+        setLink(result.link);
         return;
       }
       if (result.message) setMessage(result.message);
@@ -26,14 +30,34 @@ export function useSettingsAction() {
     });
   }
 
-  return { pending, error, message, run };
+  return { pending, error, message, link, run };
 }
 
-export function Feedback({ error, message }: { error: string; message: string }) {
+export function Feedback({
+  error,
+  message,
+  link,
+  id,
+}: {
+  error: string;
+  message: string;
+  /** a place to go to resolve the error */
+  link?: { href: string; label: string };
+  /** lets a field point at this message with aria-describedby */
+  id?: string;
+}) {
   if (error) {
     return (
-      <p role="alert" className="mt-3 rounded-lg bg-notice-soft px-3 py-2 text-sm text-notice">
+      <p id={id} role="alert" className="mt-3 rounded-lg bg-notice-soft px-3 py-2 text-sm text-notice">
         {error}
+        {link && (
+          <>
+            {" "}
+            <Link href={link.href} className="font-medium underline">
+              {link.label}
+            </Link>
+          </>
+        )}
       </p>
     );
   }
@@ -47,8 +71,4 @@ export function Feedback({ error, message }: { error: string; message: string })
   return null;
 }
 
-export const inputClass =
-  "rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-accent";
-export const smallButton = "rounded-lg border border-line px-2.5 py-1 text-xs font-medium hover:bg-bg disabled:opacity-50";
-export const primaryButton =
-  "rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-surface disabled:opacity-50";
+export { inputClass, primaryButton, secondaryButton, smallButton } from "@/components/styles";

@@ -1,10 +1,10 @@
 import "server-only";
-import { HOUSEHOLD_TIME_ZONE } from "@/lib/config";
 import { getDataSource, type HouseholdContext } from "@/lib/data";
-import { addDays, todayInTimeZone } from "@/lib/dates";
+import { addDays } from "@/lib/dates";
 import type { CategoryRow, RecurringStatus } from "@/lib/db/types";
 import { detectRecurring, type Recurring } from "./recurring";
 import type { View } from "./views";
+import { householdToday } from "@/lib/household-time";
 
 const HISTORY_DAYS = 400;
 
@@ -17,7 +17,7 @@ export interface RecurringItem extends Recurring {
 export async function loadRecurring(session: HouseholdContext, view: View) {
   const data = getDataSource();
   const householdId = session.household.id;
-  const today = todayInTimeZone(HOUSEHOLD_TIME_ZONE);
+  const today = householdToday(session.household);
   const [transactions, overrides, categories] = await Promise.all([
     data.listTransactions(householdId, { from: addDays(today, -HISTORY_DAYS) }),
     data.listRecurringOverrides(householdId),

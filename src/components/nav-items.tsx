@@ -10,7 +10,8 @@ export type IconName =
   | "chart"
   | "upload"
   | "settings"
-  | "more";
+  | "more"
+  | "calendar";
 
 const ICON_PATHS: Record<IconName, string> = {
   home: "M3 11l9-8 9 8M5 10v10h14V10",
@@ -23,6 +24,7 @@ const ICON_PATHS: Record<IconName, string> = {
   upload: "M12 16V4M7 9l5-5 5 5M4 20h16",
   settings: "M4 6h10M18 6h2M4 12h2M10 12h10M4 18h10M18 18h2M16 4v4M8 10v4M16 16v4",
   more: "M5 12h.01M12 12h.01M19 12h.01",
+  calendar: "M4 6h16v14H4zM4 10h16M8 3v4M16 3v4M9 15l2 2 4-4",
 };
 
 export function Icon({ name, className = "h-5 w-5" }: { name: IconName; className?: string }) {
@@ -48,17 +50,46 @@ export interface NavItem {
   icon: IconName;
 }
 
-export const MAIN_NAV: NavItem[] = [
-  { href: "/", label: "Dashboard", icon: "home" },
-  { href: "/transactions", label: "Transactions", icon: "list" },
-  { href: "/review", label: "Sunday Review", icon: "check" },
-  { href: "/budget", label: "Budget", icon: "wallet" },
-  { href: "/recurring", label: "Recurring", icon: "repeat" },
-  { href: "/net-worth", label: "Net Worth", icon: "trend" },
-  { href: "/charts", label: "Charts", icon: "chart" },
-  { href: "/reports", label: "Reports", icon: "list" },
-  { href: "/forecast", label: "Forecast", icon: "trend" },
-  { href: "/import", label: "Import", icon: "upload" },
-  { href: "/catch-up", label: "Catch-up", icon: "check" },
-  { href: "/settings", label: "Settings", icon: "settings" },
+export interface NavGroup {
+  label: string;
+  items: NavItem[];
+}
+
+/** Destinations grouped by when you use them. */
+export const NAV_GROUPS: NavGroup[] = [
+  {
+    label: "Weekly routine",
+    items: [
+      { href: "/", label: "Home", icon: "home" },
+      { href: "/import", label: "Import", icon: "upload" },
+      { href: "/review", label: "Sunday Review", icon: "check" },
+      { href: "/transactions", label: "Transactions", icon: "list" },
+    ],
+  },
+  {
+    label: "Planning",
+    items: [
+      { href: "/budget", label: "Budget", icon: "wallet" },
+      { href: "/recurring", label: "Recurring", icon: "repeat" },
+      { href: "/forecast", label: "Forecast", icon: "trend" },
+    ],
+  },
+  {
+    label: "History",
+    items: [
+      { href: "/month-end", label: "Month-end review", icon: "calendar" },
+      { href: "/charts", label: "Charts", icon: "chart" },
+      { href: "/reports", label: "Reports", icon: "list" },
+      { href: "/net-worth", label: "Net Worth", icon: "trend" },
+    ],
+  },
+  {
+    label: "Administration",
+    items: [
+      { href: "/catch-up", label: "Catch-up", icon: "check" },
+      { href: "/settings", label: "Settings", icon: "settings" },
+    ],
+  },
 ];
+
+export const MAIN_NAV: NavItem[] = NAV_GROUPS.flatMap((group) => group.items);

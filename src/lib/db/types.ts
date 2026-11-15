@@ -48,6 +48,8 @@ export interface HouseholdRow {
   name: string;
   /** transactions before this date are history (Catch-up), not Sunday Review */
   review_starts_on: string | null;
+  /** IANA time zone; "today" and reveal dates follow this calendar */
+  time_zone: string;
   created_at: string;
 }
 
@@ -66,7 +68,10 @@ export interface AccountRow {
   account_name: string;
   account_type: AccountType;
   last_four: string | null;
+  /** false once retired: hidden from current lists and totals */
   is_active: boolean;
+  /** closed, sold or paid off on this date: counts in net worth only before it */
+  closed_on: string | null;
   created_at: string;
 }
 
@@ -115,6 +120,16 @@ export interface TransactionRow {
   is_private: boolean;
   /** from this date it is visible to everyone again; null = until changed */
   private_until: string | null;
+  /** the import that saved (or matched) it, if any */
+  import_batch_id?: string | null;
+  /** for a refund: the purchase it refunds */
+  refund_of?: string | null;
+  /**
+   * How a split purchase's amount is divided between categories. When
+   * present (2+ parts), totals count these instead of the row's own category.
+   * Loaded with the transaction; never saved as part of it.
+   */
+  splits?: SplitRow[];
   created_at: string;
   updated_at: string;
 }
@@ -178,6 +193,45 @@ export interface AccountBalanceRow {
   created_at: string;
 }
 
+export type ImportStatus = "saving" | "saved" | "sorted";
+
+export interface ImportBatchRow {
+  id: string;
+  household_id: string;
+  user_id: string;
+  status: ImportStatus;
+  file_count: number;
+  matched: number;
+  duplicates: number;
+  sort_problem: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MonthClosingRow {
+  household_id: string;
+  /** first day of the month */
+  month: string;
+  closed_by: string | null;
+  closed_at: string;
+  spending_cents: number;
+  income_cents: number;
+  transaction_count: number;
+}
+
+export type CoverageSource = "import" | "confirmed" | "estimated";
+
+export interface AccountCoverageRow {
+  id: string;
+  household_id: string;
+  account_id: string;
+  covered_from: string;
+  covered_through: string;
+  source: CoverageSource;
+  recorded_by: string | null;
+  created_at: string;
+}
+
 export const INCOME_FREQUENCIES = ["weekly", "biweekly", "semimonthly", "monthly"] as const;
 export type IncomeFrequency = (typeof INCOME_FREQUENCIES)[number];
 
@@ -197,12 +251,28 @@ export interface IncomeSourceRow {
   created_at: string;
 }
 
-/** What the database accepts on insert (is_transfer is generated). */
-export type TransactionInsert = Omit<TransactionRow, "is_transfer">;
+export interface SplitRow {
+  id: string;
+  household_id: string;
+  transaction_id: string;
+  position: number;
+  category_id: string;
+  subcategory_id: string | null;
+  /** same sign as the transaction; the parts add up to its amount exactly */
+  amount: number;
+  note: string | null;
+  /** for a refund's part: the purchase's part it reverses */
+  refund_of_split_id: string | null;
+  created_at: string;
+}
+
+/** What the database accepts on insert (is_transfer is generated; splits live in their own table). */
+export type TransactionInsert = Omit<TransactionRow, "is_transfer" | "splits">;
 
 export function toTransactionInsert(row: TransactionRow): TransactionInsert {
   const copy: Partial<TransactionRow> = { ...row };
   delete copy.is_transfer;
+  delete copy.splits;
   return copy as TransactionInsert;
 }
 

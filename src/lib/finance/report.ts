@@ -83,7 +83,11 @@ export function csvCell(value: string | number): string {
   return /[",\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
 }
 
-export function reportToCsv(report: Report, periods: ReportPeriod[], showContributions: boolean): string {
+export function reportToCsv(
+  report: Report,
+  periods: ReportPeriod[],
+  contributions: "paid-into-shared" | "paid-in-by-both" | null,
+): string {
   const line = (cells: (string | number)[]) => cells.map(csvCell).join(",");
   const sum = (values: number[]) => values.reduce((a, b) => a + b, 0);
   const lines = [
@@ -91,7 +95,15 @@ export function reportToCsv(report: Report, periods: ReportPeriod[], showContrib
     ...report.rows.map((row) => line([row.name, ...row.cells, row.total])),
     line(["Total spending", ...report.spending, sum(report.spending)]),
     line(["Income", ...report.income, sum(report.income)]),
-    ...(showContributions ? [line(["Paid into shared", ...report.contributions, sum(report.contributions)])] : []),
+    ...(contributions
+      ? [
+          line([
+            contributions === "paid-in-by-both" ? "Paid in by both of you" : "Paid into shared",
+            ...report.contributions,
+            sum(report.contributions),
+          ]),
+        ]
+      : []),
     line(["Saved & invested", ...report.setAside, sum(report.setAside)]),
     line(["Left over", ...report.net, sum(report.net)]),
   ];

@@ -23,6 +23,16 @@ export function formatCentsRounded(cents: number): string {
   return wholeDollars.format(Math.round(fromCents(cents)));
 }
 
+/**
+ * A rounded amount with its effect spelled out: "+$1,234", "−$300" (a real
+ * minus sign, read aloud as "minus"), or "$0".
+ */
+export function formatEffectRounded(cents: number): string {
+  const rounded = Math.round(fromCents(cents));
+  if (rounded === 0) return wholeDollars.format(0);
+  return `${rounded < 0 ? "−" : "+"}${wholeDollars.format(Math.abs(rounded))}`;
+}
+
 /** Signed display for a single transaction: "-$82.41" / "+$1,500.00". */
 export function formatSignedAmount(amount: number): string {
   const cents = toCents(amount);

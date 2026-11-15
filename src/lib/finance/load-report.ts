@@ -1,9 +1,9 @@
 import "server-only";
-import { SHARED_SPENDING_MODE } from "@/lib/config";
 import { getDataSource, type HouseholdContext } from "@/lib/data";
 import { buildReport } from "./report";
 import type { ReportOptions } from "./report-options";
 import { viewEntries } from "./views";
+import { viewOptions } from "@/lib/finance/view-options";
 
 export async function loadReport(session: HouseholdContext, options: ReportOptions) {
   const data = getDataSource();
@@ -13,9 +13,6 @@ export async function loadReport(session: HouseholdContext, options: ReportOptio
     data.listCategories(householdId),
     data.listTransactions(householdId, { from: periods[0].from, to: periods[periods.length - 1].to }),
   ]);
-  const entries = viewEntries(transactions.rows, options.view, {
-    memberCount: session.members.length,
-    mode: SHARED_SPENDING_MODE,
-  });
+  const entries = viewEntries(transactions.rows, options.view, viewOptions(session));
   return { categories, report: buildReport(entries, periods, categories, options.level, options.view) };
 }

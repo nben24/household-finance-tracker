@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { TransactionList, buildLookups } from "@/components/transaction-list";
+import { inputClass, primaryButton, secondaryButton } from "@/components/styles";
 import { Card, PageHeader, Stepper } from "@/components/ui";
-import { HOUSEHOLD_TIME_ZONE, WEEK_STARTS_ON } from "@/lib/config";
+import { WEEK_STARTS_ON } from "@/lib/config";
 import { getDataSource, requireHousehold } from "@/lib/data";
 import { TRANSACTION_SORTS, type TransactionFilter, type TransactionSort } from "@/lib/data/types";
 import {
@@ -15,10 +16,10 @@ import {
   isMonthKey,
   monthKey,
   monthRange,
-  todayInTimeZone,
   weekRange,
 } from "@/lib/dates";
 import { firstParam, isUuid, queryString } from "@/lib/params";
+import { householdToday } from "@/lib/household-time";
 
 export const metadata: Metadata = { title: "Transactions" };
 
@@ -33,8 +34,6 @@ const SORT_LABELS: Record<TransactionSort, string> = {
   largest_in: "Biggest money in",
 };
 
-const controlClass =
-  "w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-accent";
 
 export default async function TransactionsPage({ searchParams }: PageProps<"/transactions">) {
   const session = await requireHousehold();
@@ -42,7 +41,7 @@ export default async function TransactionsPage({ searchParams }: PageProps<"/tra
   const data = getDataSource();
   const params = await searchParams;
 
-  const today = todayInTimeZone(HOUSEHOLD_TIME_ZONE);
+  const today = householdToday(session.household);
   const currentMonth = monthKey(today);
   // The filter form sends `when` ("all", "2026-09" or "w2026-09-27"); links send `week` or `month`.
   const when = firstParam(params.when);
@@ -99,6 +98,17 @@ export default async function TransactionsPage({ searchParams }: PageProps<"/tra
       sort: sort === "newest" ? undefined : sort,
       ...overrides,
     });
+  const personName = personId === "household" ? "Shared" : session.members.find((member) => member.id === personId)?.name;
+  const activeFilters = [
+    search ? { key: "q", label: `“${search}”` } : null,
+    categoryId ? { key: "category", label: categories.find((c) => c.id === categoryId)?.name ?? "Category" } : null,
+    personId ? { key: "person", label: personName ?? "Person" } : null,
+    accountId
+      ? { key: "account", label: (() => { const a = accounts.find((x) => x.id === accountId); return a ? `${a.institution} ${a.account_name}` : "Account"; })() }
+      : null,
+    needsReview ? { key: "review", label: "Needs review" } : null,
+    sort !== "newest" ? { key: "sort", label: SORT_LABELS[sort] } : null,
+  ].filter((filter): filter is { key: string; label: string } => filter !== null);
   const pageHref = (page: number) => `/transactions${filterQuery({ page: page > 1 ? page : undefined })}`;
   const weekHref = (from: string) => `/transactions${filterQuery({ week: from })}`;
   const periodText = week
@@ -116,7 +126,7 @@ export default async function TransactionsPage({ searchParams }: PageProps<"/tra
       >
         <Link
           href="/transactions/new"
-          className="rounded-lg bg-accent px-3 py-1.5 text-sm font-semibold text-surface"
+          className={primaryButton}
         >
           + Add
         </Link>
@@ -129,21 +139,21 @@ export default async function TransactionsPage({ searchParams }: PageProps<"/tra
         )}
       </PageHeader>
 
-      <Card className="mb-4">
-        <form method="get" className="grid grid-cols-2 gap-3 lg:grid-cols-7">
-          <label className="col-span-2 text-xs font-medium text-muted">
+      <form method="get" className="mb-4 rounded-xl border border-line bg-surface p-4 sm:p-5" aria-label="Find transactions">
+        <div className="grid gap-3 sm:grid-cols-[2fr_1fr_auto] sm:items-end">
+          <label className="text-sm font-medium">
             Search
             <input
               type="search"
               name="q"
               defaultValue={search}
               placeholder="Merchant or description"
-              className={`mt-1 ${controlClass}`}
+              className={`mt-1 w-full ${inputClass}`}
             />
           </label>
-          <label className="text-xs font-medium text-muted">
-            When
-            <select name="when" defaultValue={whenValue} className={`mt-1 ${controlClass}`}>
+          <label className="text-sm font-medium">
+            Period
+            <select name="when" defaultValue={whenValue} className={`mt-1 w-full ${inputClass}`}>
               <option value="all">All time</option>
               <optgroup label="Weeks">
                 {weekChoices.map((start) => (
@@ -161,71 +171,102 @@ export default async function TransactionsPage({ searchParams }: PageProps<"/tra
               </optgroup>
             </select>
           </label>
-          <label className="text-xs font-medium text-muted">
-            Category
-            <select name="category" defaultValue={categoryId ?? ""} className={`mt-1 ${controlClass}`}>
-              <option value="">All categories</option>
-              {categories
-                .filter((category) => category.parent_id === null)
-                .map((category) => (
-                  <option key={category.id} value={category.id}>
-                    {category.name}
+          <button type="submit" className={primaryButton}>
+            Show
+          </button>
+        </div>
+
+        <details className="mt-3">
+          <summary className="inline-flex min-h-9 cursor-pointer items-center gap-1 text-sm font-medium text-accent">
+            Filters{activeFilters.length > 0 && ` (${activeFilters.length})`}
+          </summary>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <label className="text-sm font-medium">
+              Category
+              <select name="category" defaultValue={categoryId ?? ""} className={`mt-1 w-full ${inputClass}`}>
+                <option value="">All categories</option>
+                {categories
+                  .filter((category) => category.parent_id === null)
+                  .map((category) => (
+                    <option key={category.id} value={category.id}>
+                      {category.name}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <label className="text-sm font-medium">
+              Person
+              <select name="person" defaultValue={personId ?? ""} className={`mt-1 w-full ${inputClass}`}>
+                <option value="">Everyone</option>
+                {session.members.map((member) => (
+                  <option key={member.id} value={member.id}>
+                    {member.name}
                   </option>
                 ))}
-            </select>
-          </label>
-          <label className="text-xs font-medium text-muted">
-            Person
-            <select name="person" defaultValue={personId ?? ""} className={`mt-1 ${controlClass}`}>
-              <option value="">Everyone</option>
-              {session.members.map((member) => (
-                <option key={member.id} value={member.id}>
-                  {member.name}
-                </option>
-              ))}
-              <option value="household">Shared (joint account)</option>
-            </select>
-          </label>
-          <label className="text-xs font-medium text-muted">
-            Account
-            <select name="account" defaultValue={accountId ?? ""} className={`mt-1 ${controlClass}`}>
-              <option value="">All accounts</option>
-              {accounts.map((account) => (
-                <option key={account.id} value={account.id}>
-                  {account.institution} {account.account_name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="text-xs font-medium text-muted">
-            Sort
-            <select name="sort" defaultValue={sort} className={`mt-1 ${controlClass}`}>
-              {TRANSACTION_SORTS.map((choice) => (
-                <option key={choice} value={choice}>
-                  {SORT_LABELS[choice]}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="col-span-2 flex flex-wrap items-center justify-between gap-3 lg:col-span-7">
-            <label className="flex items-center gap-2 text-sm">
+                <option value="household">Shared (joint account)</option>
+              </select>
+            </label>
+            <label className="text-sm font-medium">
+              Account
+              <select name="account" defaultValue={accountId ?? ""} className={`mt-1 w-full ${inputClass}`}>
+                <option value="">All accounts</option>
+                {accounts.map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {account.institution} {account.account_name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-sm font-medium">
+              Sort
+              <select name="sort" defaultValue={sort} className={`mt-1 w-full ${inputClass}`}>
+                {TRANSACTION_SORTS.map((choice) => (
+                  <option key={choice} value={choice}>
+                    {SORT_LABELS[choice]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex min-h-10 items-center gap-2 text-sm sm:col-span-2">
               <input type="checkbox" name="review" value="1" defaultChecked={needsReview} className="h-4 w-4" />
               Only show what needs review
             </label>
-            <div className="flex items-center gap-3">
-              <Link href="/transactions" className="text-sm font-medium text-muted hover:text-text">
-                Clear
-              </Link>
-              <button type="submit" className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-surface">
-                Apply
+            <div className="flex items-center justify-end gap-3 sm:col-span-2">
+              <button type="submit" className={secondaryButton}>
+                Apply filters
               </button>
             </div>
           </div>
-        </form>
-      </Card>
+        </details>
+
+        {activeFilters.length > 0 && (
+          <ul className="mt-3 flex flex-wrap items-center gap-2" aria-label="Active filters">
+            {activeFilters.map((filter) => (
+              <li key={filter.key}>
+                <Link
+                  href={`/transactions${filterQuery({ [filter.key]: undefined, page: undefined })}`}
+                  className="inline-flex min-h-9 max-w-full items-center gap-1.5 rounded-full border border-line bg-bg px-3 text-sm"
+                >
+                  <span className="truncate">{filter.label}</span>
+                  <span aria-hidden="true" className="text-muted">
+                    ×
+                  </span>
+                  <span className="sr-only">(remove this filter)</span>
+                </Link>
+              </li>
+            ))}
+            <li>
+              <Link href={`/transactions${filterQuery({ q: undefined, category: undefined, account: undefined, person: undefined, review: undefined, sort: undefined })}`} className="text-sm font-medium text-muted hover:text-text">
+                Clear all
+              </Link>
+            </li>
+          </ul>
+        )}
+      </form>
 
       <Card>
         <TransactionList
+          today={today}
           transactions={result.rows}
           lookups={lookups}
           empty="No transactions match these choices."

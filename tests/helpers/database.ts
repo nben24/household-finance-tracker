@@ -34,13 +34,24 @@ const SUPABASE_SHIM = `
     grant execute on functions to anon, authenticated, service_role;
 `;
 
-export async function createTestDatabase(): Promise<PGlite> {
+/**
+ * A fresh database with the migrations applied. `before` stops at the first
+ * migration whose file name is at or after it (finish with applyMigrations).
+ */
+export async function createTestDatabase(options: { before?: string } = {}): Promise<PGlite> {
   const db = new PGlite();
   await db.exec(SUPABASE_SHIM);
+  await applyMigrations(db, { before: options.before });
+  return db;
+}
+
+/** Applies migration files in order, optionally only those from `from` and/or before `before`. */
+export async function applyMigrations(db: PGlite, { from, before }: { from?: string; before?: string } = {}) {
   for (const file of readdirSync(MIGRATIONS_DIR).sort()) {
+    if (from && file < from) continue;
+    if (before && file >= before) continue;
     await db.exec(readFileSync(join(MIGRATIONS_DIR, file), "utf8"));
   }
-  return db;
 }
 
 /** Creates a login; the migration's trigger creates the matching profile. */
@@ -64,16 +75,29 @@ async function insertRows(db: PGlite, table: string, rows: object[]) {
 }
 
 /** Inserts generated seed data the same way scripts/seed.ts does (as admin). */
-export async function insertSeed(db: PGlite, seed: SeedData) {
-  await insertRows(db, "households", [seed.household]);
+export async function insertSeed(db: PGlite, seed: SeedData, { coverage = true }: { coverage?: boolean } = {}) {
+  const columns = await db.query<{ column_name: string }>(
+    "select column_name from information_schema.columns where table_schema = 'public' and table_name = 'households'",
+  );
+  const known = new Set(columns.rows.map((row) => row.column_name));
+  await insertRows(db, "households", [Object.fromEntries(Object.entries(seed.household).filter(([key]) => known.has(key)))]);
   await insertRows(db, "household_members", seed.members);
   await insertRows(db, "categories", seed.categories.filter((c) => c.parent_id === null));
   await insertRows(db, "categories", seed.categories.filter((c) => c.parent_id !== null));
   await insertRows(db, "categorization_rules", seed.rules);
-  await insertRows(db, "accounts", seed.accounts);
+  const accountColumns = await db.query<{ column_name: string }>(
+    "select column_name from information_schema.columns where table_schema = 'public' and table_name = 'accounts'",
+  );
+  const accountKnown = new Set(accountColumns.rows.map((row) => row.column_name));
+  await insertRows(
+    db,
+    "accounts",
+    seed.accounts.map((row) => Object.fromEntries(Object.entries(row).filter(([key]) => accountKnown.has(key)))),
+  );
   await insertRows(db, "transactions", seed.transactions.map(toTransactionInsert));
   await insertRows(db, "budget_lines", seed.budgets);
   await insertRows(db, "account_balances", seed.balances);
+  if (coverage) await insertRows(db, "account_coverage", seed.coverage);
 }
 
 /**

@@ -110,16 +110,31 @@ export function TooltipRow({
 }
 
 /** Every value of a chart, readable without hovering. */
-export function TableView({ head, rows }: { head: string[]; rows: (string | number)[][] }) {
+export function TableView({
+  head,
+  rows,
+  caption,
+  links,
+}: {
+  head: string[];
+  rows: (string | number)[][];
+  /** what the table shows, read to screen readers */
+  caption?: string;
+  /** optional link for each row's first cell */
+  links?: (string | undefined)[];
+}) {
   return (
-    <details className="mt-3 text-xs">
-      <summary className="cursor-pointer font-medium text-muted hover:text-text">Show as a table</summary>
-      <div className="mt-2 overflow-x-auto">
+    <details className="mt-3 text-sm">
+      <summary className="inline-flex min-h-9 cursor-pointer items-center font-medium text-muted hover:text-text">
+        Show as a table
+      </summary>
+      <div className="mt-2 max-h-96 overflow-auto">
         <table className="w-full">
+          {caption && <caption className="mb-1 text-left text-[13px] text-muted">{caption}</caption>}
           <thead>
             <tr className="text-left text-muted">
               {head.map((cell, index) => (
-                <th key={cell} className={`pb-1 font-medium ${index > 0 ? "text-right" : ""}`}>
+                <th key={cell} scope="col" className={`pb-1 font-medium ${index > 0 ? "text-right" : ""}`}>
                   {cell}
                 </th>
               ))}
@@ -129,8 +144,14 @@ export function TableView({ head, rows }: { head: string[]; rows: (string | numb
             {rows.map((row, rowIndex) => (
               <tr key={rowIndex}>
                 {row.map((cell, index) => (
-                  <td key={index} className={`py-1 ${index > 0 ? "text-right tabular" : ""}`}>
-                    {cell}
+                  <td key={index} className={`py-1 ${index > 0 ? "text-right tabular" : "break-anywhere pr-2"}`}>
+                    {index === 0 && links?.[rowIndex] ? (
+                      <a href={links[rowIndex]} className="text-accent hover:underline">
+                        {cell}
+                      </a>
+                    ) : (
+                      cell
+                    )}
                   </td>
                 ))}
               </tr>

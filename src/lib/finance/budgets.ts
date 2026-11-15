@@ -32,22 +32,37 @@ export function linesForView<T extends Line>(lines: T[], view: View): T[] {
   return lines.filter((line) => line.scope === scope && line.person_id === person_id);
 }
 
+type LineKey = Pick<Line, "scope" | "person_id" | "category_id" | "subcategory_id">;
+
 /**
- * Whether a new line would count spending another active line already counts:
- * same category in the same view, or the same category household-wide and per
- * person/shared.
+ * The active line that already counts the spending a new line would count, if
+ * any: the same category in the same view, or the same category
+ * household-wide and per person/shared. In "split" mode a person's view
+ * already includes their share of shared spending, so a personal line and a
+ * shared line for the same category also conflict.
  */
-export function conflictsWith(
-  candidate: Pick<Line, "scope" | "person_id" | "category_id" | "subcategory_id">,
-  active: Pick<Line, "scope" | "person_id" | "category_id" | "subcategory_id">[],
-): boolean {
-  return active.some(
-    (line) =>
-      overlaps(line, candidate) &&
-      ((line.scope === candidate.scope && line.person_id === candidate.person_id) ||
-        line.scope === "everyone" ||
-        candidate.scope === "everyone"),
+export function findConflict<T extends LineKey>(
+  candidate: LineKey,
+  active: T[],
+  mode: "separate" | "split" = "separate",
+): T | null {
+  const personAndShared = (a: LineKey, b: LineKey) =>
+    (a.scope === "person" && b.scope === "shared") || (a.scope === "shared" && b.scope === "person");
+  return (
+    active.find(
+      (line) =>
+        overlaps(line, candidate) &&
+        ((line.scope === candidate.scope && line.person_id === candidate.person_id) ||
+          line.scope === "everyone" ||
+          candidate.scope === "everyone" ||
+          (mode === "split" && personAndShared(line, candidate))),
+    ) ?? null
   );
+}
+
+/** Whether a new line would count spending another active line already counts (see findConflict). */
+export function conflictsWith(candidate: LineKey, active: LineKey[], mode: "separate" | "split" = "separate"): boolean {
+  return findConflict(candidate, active, mode) !== null;
 }
 
 const firstOf = (month: string) => `${month}-01`;
@@ -196,4 +211,48 @@ export function tidyAmount(cents: number): number {
   const dollars = cents / 100;
   const step = dollars >= 500 ? 25 : dollars >= 100 ? 10 : 5;
   return Math.ceil(dollars / step) * step;
+}
+
+export type BudgetTone = "normal" | "over" | "fixed";
+
+export interface BudgetStatus {
+  tone: BudgetTone;
+  /** how full the bar is, 0–1 */
+  fraction: number;
+  /** a short plain-language status, also read to screen readers (never claims a bill was paid) */
+  text: string;
+  over: boolean;
+}
+
+/**
+ * How a budget line is doing, the same on the dashboard and the Budget page.
+ * Fixed bills get their own wording: the app sees charges, not whether a bill
+ * was settled, so it says "charged", never "paid".
+ */
+export function budgetStatus(
+  p: Pick<BudgetProgress, "budgetCents" | "spentCents" | "remainingCents" | "fund"> & { line: Pick<Line, "kind"> },
+  format: (cents: number) => string,
+): BudgetStatus {
+  const fraction = p.budgetCents > 0 ? Math.min(1, Math.max(0, p.spentCents / p.budgetCents)) : p.spentCents > 0 ? 1 : 0;
+  if (p.fund) {
+    const over = p.fund.availableCents < 0;
+    return {
+      tone: over ? "over" : "normal",
+      fraction,
+      over,
+      text: over ? `${format(-p.fund.availableCents)} more than set aside` : `${format(p.fund.availableCents)} available`,
+    };
+  }
+  if (p.line.kind === "fixed") {
+    if (p.spentCents > p.budgetCents) {
+      return { tone: "over", fraction: 1, over: true, text: `${format(p.spentCents - p.budgetCents)} more than budgeted` };
+    }
+    if (p.spentCents <= 0) return { tone: "fixed", fraction: 0, over: false, text: "Not charged yet this month" };
+    if (p.spentCents === p.budgetCents) return { tone: "fixed", fraction: 1, over: false, text: "Charged the budgeted amount" };
+    return { tone: "fixed", fraction, over: false, text: `${format(p.spentCents)} charged so far` };
+  }
+  if (p.remainingCents < 0) {
+    return { tone: "over", fraction: 1, over: true, text: `${format(-p.remainingCents)} over budget` };
+  }
+  return { tone: "normal", fraction, over: false, text: `${format(p.remainingCents)} left` };
 }

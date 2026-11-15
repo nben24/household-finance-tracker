@@ -8,12 +8,12 @@ import { sortUnknownMerchantsWithAi } from "@/lib/categories/ai-sort";
 import { applyRulesToWaiting } from "@/lib/categories/apply";
 import { REVIEW_KINDS, reviewChanges, type ReviewKind } from "@/lib/categories/review";
 import { findRule, learnFromChoice, normalizePattern } from "@/lib/categories/rules";
-import { HOUSEHOLD_TIME_ZONE } from "@/lib/config";
 import { catchUpFilter, getDataSource, requireHousehold } from "@/lib/data";
 import { MISSING_MIGRATION } from "@/lib/data/supabase";
 import type { TransactionChanges } from "@/lib/data/types";
-import { isISODate, todayInTimeZone } from "@/lib/dates";
+import { isISODate } from "@/lib/dates";
 import { isUuid } from "@/lib/params";
+import { householdToday } from "@/lib/household-time";
 
 const DEMO_MESSAGE = "This is the demo with made-up data, so nothing can be saved here.";
 
@@ -34,7 +34,7 @@ export async function setReviewStart(input: { date: string | null }): Promise<Se
     const session = await requireHousehold();
     if (session.isDemo) return { ok: false, error: DEMO_MESSAGE };
     const date = input.date ? String(input.date) : null;
-    if (date && (!isISODate(date) || date > todayInTimeZone(HOUSEHOLD_TIME_ZONE))) {
+    if (date && (!isISODate(date) || date > householdToday(session.household))) {
       return { ok: false, error: "Choose a date that isn't in the future." };
     }
     const data = getDataSource();

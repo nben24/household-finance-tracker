@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { RecurringActions } from "@/components/recurring/recurring-actions";
-import { Card, Metric, PageHeader } from "@/components/ui";
+import { Card, MetricTile, PageHeader } from "@/components/ui";
 import { ViewSwitcher } from "@/components/view-switcher";
 import { requireHousehold } from "@/lib/data";
 import { addDays, formatDay, formatDayWithYear } from "@/lib/dates";
@@ -117,14 +117,14 @@ export default async function RecurringPage({ searchParams }: PageProps<"/recurr
       <ViewSwitcher path="/recurring" current={view} members={session.members} />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Metric label="Recurring charges" value={formatCentsRounded(sum(charges, "monthlyCents"))} hint="a month" />
-        <Metric label="Per year" value={formatCentsRounded(sum(charges, "annualCents"))} hint="at today's prices" />
-        <Metric
+        <MetricTile label="Recurring charges" value={formatCentsRounded(sum(charges, "monthlyCents"))} hint="a month" />
+        <MetricTile label="Per year" value={formatCentsRounded(sum(charges, "annualCents"))} hint="at today's prices" />
+        <MetricTile
           label="Subscriptions"
           value={formatCentsRounded(sum(subscriptions, "monthlyCents"))}
           hint={`a month · ${formatCentsRounded(sum(subscriptions, "annualCents"))} a year`}
         />
-        <Metric label="Recurring income" value={formatCentsRounded(sum(income, "monthlyCents"))} hint="a month" />
+        <MetricTile label="Recurring income" value={formatCentsRounded(sum(income, "monthlyCents"))} hint="a month" />
       </div>
 
       {changes.length > 0 && (

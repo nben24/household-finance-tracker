@@ -3,10 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
 import type { SettingsResult } from "@/app/(app)/settings/actions";
-import { HOUSEHOLD_TIME_ZONE } from "@/lib/config";
 import { getDataSource, requireHousehold } from "@/lib/data";
 import { MISSING_MIGRATION } from "@/lib/data/supabase";
-import { isISODate, todayInTimeZone } from "@/lib/dates";
+import { addDays, formatDayWithYear, isISODate } from "@/lib/dates";
+import { householdToday } from "@/lib/household-time";
 import { ACCOUNT_TYPES, type AccountType } from "@/lib/db/types";
 import { isUuid } from "@/lib/params";
 
@@ -26,9 +26,9 @@ function parseBalance(value: unknown): number | null {
   return Number.isFinite(amount) && Math.abs(amount) < 1e11 ? amount : null;
 }
 
-function parseDate(value: unknown): string | null {
+function parseDate(value: unknown, today: string): string | null {
   const date = String(value ?? "");
-  return isISODate(date) && date <= todayInTimeZone(HOUSEHOLD_TIME_ZONE) ? date : null;
+  return isISODate(date) && date <= today ? date : null;
 }
 
 async function context() {
@@ -56,7 +56,7 @@ export async function addNetWorthAccount(input: {
       return { ok: false, error: "Choose whose it is." };
     }
     const balance = parseBalance(input.balance);
-    const asOf = parseDate(input.asOf);
+    const asOf = parseDate(input.asOf, householdToday(ctx.session.household));
     if (balance === null) return { ok: false, error: "Enter the current balance." };
     if (!asOf) return { ok: false, error: "Choose a date that isn't in the future." };
 
@@ -82,7 +82,7 @@ export async function updateBalance(input: { accountId: string; balance: string;
     const accounts = await ctx.data.listAccounts(ctx.householdId);
     if (!accounts.some((account) => account.id === input.accountId)) return { ok: false, error: "That account no longer exists." };
     const balance = parseBalance(input.balance);
-    const asOf = parseDate(input.asOf);
+    const asOf = parseDate(input.asOf, householdToday(ctx.session.household));
     if (balance === null) return { ok: false, error: "Enter the balance." };
     if (!asOf) return { ok: false, error: "Choose a date that isn't in the future." };
     await ctx.data.saveBalance(ctx.householdId, { account_id: input.accountId, as_of: asOf, balance });
@@ -106,16 +106,52 @@ export async function removeBalance(id: string): Promise<SettingsResult> {
   }
 }
 
-/** Retired accounts (closed, sold, paid off) leave net worth but keep their history. */
-export async function setAccountActive(input: { accountId: string; active: boolean }): Promise<SettingsResult> {
+/**
+ * Retires an account that was closed, sold or paid off on a date. It counts in
+ * net worth before that date (earlier months don't change) and not from it
+ * on. An optional final balance is recorded for the day before it closed.
+ * This does not record sale proceeds or a payoff: those show up in the
+ * account the money went to or came from.
+ */
+export async function retireAccount(input: {
+  accountId: string;
+  closedOn: string;
+  finalBalance?: string;
+}): Promise<SettingsResult> {
   try {
     const ctx = await context();
     if (!ctx) return { ok: false, error: DEMO_MESSAGE };
     if (!isUuid(String(input.accountId))) return { ok: false, error: "That account no longer exists." };
-    await ctx.data.updateAccount(ctx.householdId, input.accountId, { is_active: Boolean(input.active) });
+    const accounts = await ctx.data.listAccounts(ctx.householdId);
+    const account = accounts.find((candidate) => candidate.id === input.accountId);
+    if (!account) return { ok: false, error: "That account no longer exists." };
+    const closedOn = parseDate(input.closedOn, householdToday(ctx.session.household));
+    if (!closedOn) return { ok: false, error: "Choose the date it closed — today or earlier." };
+    const finalText = String(input.finalBalance ?? "").trim();
+    const finalBalance = finalText === "" ? null : parseBalance(finalText);
+    if (finalText !== "" && finalBalance === null) return { ok: false, error: "Enter the final balance as a number, or leave it blank." };
+
+    if (finalBalance !== null) {
+      await ctx.data.saveBalance(ctx.householdId, { account_id: account.id, as_of: addDays(closedOn, -1), balance: finalBalance });
+    }
+    await ctx.data.updateAccount(ctx.householdId, account.id, { is_active: false, closed_on: closedOn });
     revalidatePath("/", "layout");
-    return { ok: true };
+    return { ok: true, message: `Retired from ${formatDayWithYear(closedOn)}. Earlier months still include it.` };
   } catch (error) {
-    return problem(error, "setAccountActive");
+    return problem(error, "retireAccount");
+  }
+}
+
+/** Brings a retired account back: listed again and counted on every date. */
+export async function restoreAccount(input: { accountId: string }): Promise<SettingsResult> {
+  try {
+    const ctx = await context();
+    if (!ctx) return { ok: false, error: DEMO_MESSAGE };
+    if (!isUuid(String(input.accountId))) return { ok: false, error: "That account no longer exists." };
+    await ctx.data.updateAccount(ctx.householdId, input.accountId, { is_active: true, closed_on: null });
+    revalidatePath("/", "layout");
+    return { ok: true, message: "Restored." };
+  } catch (error) {
+    return problem(error, "restoreAccount");
   }
 }

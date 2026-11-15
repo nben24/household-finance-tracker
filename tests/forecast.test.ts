@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { forecastMonth, scheduleDates, type ForecastInput } from "@/lib/finance/forecast";
+import { cashFlowLines, forecastMonth, resultLabel, scheduleDates, type ForecastInput } from "@/lib/finance/forecast";
 import type { Entry } from "@/lib/finance/views";
 
 describe("pay schedules", () => {
@@ -158,5 +158,66 @@ describe("money set aside", () => {
     const after = forecastMonth(input({ entries: [...history, saved, invested] }));
     expect(after.setAsideSoFarCents).toBe(85000);
     expect(after.leftOver.expectedCents).toBe(before.leftOver.expectedCents - 85000);
+  });
+});
+
+describe("the cash flow keeps its signs", () => {
+  const sum = (lines: { effectCents: number }[]) => lines.reduce((total, line) => total + line.effectCents, 0);
+  const saved = (date: string, dollars: number): Entry => ({ date, cents: dollars * 100, kind: "saved", categoryId: null, subcategoryId: null });
+  const views = [
+    { kind: "everyone" as const },
+    { kind: "person" as const, personId: "n" },
+    { kind: "shared" as const },
+  ];
+
+  it("adds up exactly to the projected result in every view, this month and next", () => {
+    for (const view of views) {
+      for (const month of ["2026-10", "2026-11"]) {
+        const f = forecastMonth(input({ view, month }));
+        expect(sum(cashFlowLines(f, view, month === "2026-10"))).toBe(f.leftOver.expectedCents);
+      }
+    }
+  });
+
+  it("shows a shortfall as a shortfall, not as money left over", () => {
+    // A big purchase this month and no more paychecks: spending outruns income.
+    const entries = [...history, spend("2026-10-08", 6000, "furniture", "home")];
+    const f = forecastMonth(input({ entries, income: [], view: { kind: "everyone" } }));
+    expect(f.leftOver.expectedCents).toBeLessThan(0);
+    const result = resultLabel(f.leftOver.expectedCents);
+    expect(result).toEqual({ label: "Projected shortfall", shortfall: true, amountCents: -f.leftOver.expectedCents });
+    expect(sum(cashFlowLines(f, { kind: "everyone" }, true))).toBe(f.leftOver.expectedCents);
+  });
+
+  it("calls zero 'left over', never a shortfall", () => {
+    expect(resultLabel(0)).toEqual({ label: "Projected left over", shortfall: false, amountCents: 0 });
+    expect(resultLabel(30000)).toEqual({ label: "Projected left over", shortfall: false, amountCents: 30000 });
+  });
+
+  it("adds money taken out of savings instead of subtracting it", () => {
+    const entries = [...history, saved("2026-10-03", -400)]; // moved $400 back out of savings
+    const f = forecastMonth(input({ entries, view: { kind: "everyone" } }));
+    expect(f.setAsideSoFarCents).toBe(-40000);
+    const line = cashFlowLines(f, { kind: "everyone" }, true).find((l) => l.key === "set-aside")!;
+    expect(line.effectCents).toBe(40000);
+    expect(line.label).toMatch(/taken out of savings/i);
+    expect(sum(cashFlowLines(f, { kind: "everyone" }, true))).toBe(f.leftOver.expectedCents);
+  });
+
+  it("treats a refund-heavy month as money coming back", () => {
+    const refunds = history.filter((entry) => entry.date < "2026-10-01").concat([
+      { date: "2026-10-02", cents: -25000, kind: "spending", categoryId: "food", subcategoryId: "groceries" },
+    ]);
+    const f = forecastMonth(input({ entries: refunds, view: { kind: "everyone" } }));
+    expect(f.spentSoFarCents).toBe(-25000);
+    const line = cashFlowLines(f, { kind: "everyone" }, true).find((l) => l.key === "spent")!;
+    expect(line.effectCents).toBe(25000);
+    expect(line.label).toMatch(/refunds/i);
+    expect(sum(cashFlowLines(f, { kind: "everyone" }, true))).toBe(f.leftOver.expectedCents);
+  });
+
+  it("only counts complete months as history when told which are complete", () => {
+    const f = forecastMonth(input({ isMonthComplete: (month) => month >= "2026-07" && month !== "2026-08" }));
+    expect(f.historyMonths).toBe(2);
   });
 });

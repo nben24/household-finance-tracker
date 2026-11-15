@@ -1,6 +1,7 @@
 import { monthKey } from "@/lib/dates";
 import type { CategoryRow, TransactionRow } from "@/lib/db/types";
 import { toCents } from "@/lib/money";
+import { allocationsOf } from "./allocations";
 
 type SummaryTransaction = Pick<
   TransactionRow,
@@ -11,7 +12,8 @@ type SummaryTransaction = Pick<
   | "counterparty_id"
   | "review_status"
   | "transaction_date"
->;
+> &
+  Partial<Pick<TransactionRow, "subcategory_id" | "splits">>;
 
 /**
  * Only expenses and refunds count toward spending. Transfers, credit card
@@ -80,13 +82,28 @@ function groupSpending(
   return [...groups.values()].sort((a, b) => b.cents - a.cents || a.name.localeCompare(b.name));
 }
 
+/** The parts of each spending row, as rows of their own (a split purchase becomes its parts). */
+function byPart(transactions: SummaryTransaction[]): SummaryTransaction[] {
+  return transactions.flatMap((transaction) =>
+    countsAsSpending(transaction)
+      ? allocationsOf({ ...transaction, subcategory_id: transaction.subcategory_id ?? null }).map((part) => ({
+          ...transaction,
+          amount: part.cents / 100,
+          category_id: part.categoryId,
+          subcategory_id: part.subcategoryId,
+          splits: undefined,
+        }))
+      : [transaction],
+  );
+}
+
 export function spendingByCategory(
   transactions: SummaryTransaction[],
   categories: Pick<CategoryRow, "id" | "name">[],
 ): GroupTotal[] {
   const names = new Map(categories.map((category) => [category.id, category.name]));
   return groupSpending(
-    transactions,
+    byPart(transactions),
     (transaction) => transaction.category_id,
     (id) => (id ? (names.get(id) ?? "Unknown") : "Not yet categorized"),
   );
@@ -151,6 +168,6 @@ export function otherSpending(
 ): { categoryId: string | null; cents: number; count: number } {
   const other = categories.find((category) => category.parent_id === null && category.name.toLowerCase() === "other");
   if (!other) return { categoryId: null, cents: 0, count: 0 };
-  const rows = transactions.filter((t) => countsAsSpending(t) && t.category_id === other.id);
+  const rows = byPart(transactions).filter((t) => countsAsSpending(t) && t.category_id === other.id);
   return { categoryId: other.id, cents: spendingCents(rows), count: rows.length };
 }

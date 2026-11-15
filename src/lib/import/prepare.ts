@@ -22,8 +22,12 @@ import type { NormalizedTransaction } from "./types";
 export const MAX_FILES_PER_IMPORT = 10;
 
 export interface ImportFileInput {
+  /** the browser's id for this file, so two files with the same name stay apart */
+  fileKey?: string;
   fileName: string;
   accountId: string;
+  /** the person confirmed the download includes everything through this date */
+  coveredThrough?: string | null;
   transactions: NormalizedTransaction[];
   /** the account balance shown at the end of the file, if the export has one */
   latestBalance?: { date: string; balance: number } | null;
@@ -43,8 +47,12 @@ export function validateImportInput(input: unknown): ImportFileInput[] | null {
   const files: ImportFileInput[] = [];
   for (const file of input) {
     if (typeof file !== "object" || file === null) return null;
-    const { fileName, accountId, transactions, latestBalance } = file as Record<string, unknown>;
+    const { fileName, accountId, transactions, latestBalance, fileKey, coveredThrough } = file as Record<string, unknown>;
     if (typeof accountId !== "string" || !isUuid(accountId)) return null;
+    const key = typeof fileKey === "string" && /^[\w-]{1,64}$/.test(fileKey) ? fileKey : `file-${files.length}`;
+    if (!(coveredThrough === undefined || coveredThrough === null || (typeof coveredThrough === "string" && isISODate(coveredThrough)))) {
+      return null;
+    }
     if (!Array.isArray(transactions) || transactions.length > MAX_ROWS_PER_FILE) return null;
 
     const rows: NormalizedTransaction[] = [];
@@ -77,7 +85,18 @@ export function validateImportInput(input: unknown): ImportFileInput[] | null {
         bankCategory: text(row.bankCategory, 100),
       });
     }
-    files.push({ fileName: safeFileName(fileName), accountId, transactions: rows, latestBalance: validBalance(latestBalance) });
+    // Coverage can't end before the file's own last row.
+    const lastRow = rows.reduce<string | null>((max, row) => (!max || row.transactionDate > max ? row.transactionDate : max), null);
+    const through =
+      typeof coveredThrough === "string" && (lastRow === null || coveredThrough >= lastRow) ? coveredThrough : lastRow;
+    files.push({
+      fileKey: key,
+      fileName: safeFileName(fileName),
+      accountId,
+      coveredThrough: through,
+      transactions: rows,
+      latestBalance: validBalance(latestBalance),
+    });
   }
   return files;
 }
